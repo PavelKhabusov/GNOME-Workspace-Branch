@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.workspace-branch"
+          path="/org/gnome/shell/extensions/workspace-branch/">
+
+    <key name="appendages" type="s">
+      <default>"[]"</default>
+      <summary>JSON array describing appendage workspaces in linear order.</summary>
+      <description>
+        Each entry: {"col": int, "dir": "up"|"down"}. The i-th entry corresponds to
+        the workspace at linear index (main-row-size + i).
+      </description>
+    </key>
+
+    <key name="main-row-size" type="i">
+      <default>0</default>
+      <summary>Recorded size of the main horizontal row.</summary>
+    </key>
+
+    <key name="forget-empty-on-disable" type="b">
+      <default>false</default>
+      <summary>Forget empty appendages when the extension is disabled.</summary>
+    </key>
+
+    <key name="switch-up" type="as">
+      <default><![CDATA[['<Super>Up']]]></default>
+      <summary>Switch to workspace above current column.</summary>
+    </key>
+
+    <key name="switch-down" type="as">
+      <default><![CDATA[['<Super>Down']]]></default>
+      <summary>Switch to workspace below current column.</summary>
+    </key>
+
+    <key name="switch-left" type="as">
+      <default><![CDATA[['<Super>Left']]]></default>
+      <summary>Switch to workspace to the left within main row.</summary>
+    </key>
+
+    <key name="switch-right" type="as">
+      <default><![CDATA[['<Super>Right']]]></default>
+      <summary>Switch to workspace to the right within main row.</summary>
+    </key>
+
+    <key name="move-window-left" type="as">
+      <default><![CDATA[['<Super><Shift>Left']]]></default>
+      <summary>Move active window to the left within main row.</summary>
+    </key>
+
+    <key name="move-window-right" type="as">
+      <default><![CDATA[['<Super><Shift>Right']]]></default>
+      <summary>Move active window to the right within main row.</summary>
+    </key>
+
+    <key name="create-up" type="as">
+      <default><![CDATA[['<Super><Control>Up']]]></default>
+      <summary>Create and switch to a new appendage above current column.</summary>
+    </key>
+
+    <key name="create-down" type="as">
+      <default><![CDATA[['<Super><Control>Down']]]></default>
+      <summary>Create and switch to a new appendage below current column.</summary>
+    </key>
+
+    <key name="extend-row-right" type="as">
+      <default><![CDATA[['<Super><Control>Right']]]></default>
+      <summary>Extend main row with a new column on the right.</summary>
+    </key>
+
+    <key name="move-window-up" type="as">
+      <default><![CDATA[['<Super><Shift>Up']]]></default>
+      <summary>Move active window to workspace above.</summary>
+    </key>
+
+    <key name="move-window-down" type="as">
+      <default><![CDATA[['<Super><Shift>Down']]]></default>
+      <summary>Move active window to workspace below.</summary>
+    </key>
+
+    <key name="remove-current" type="as">
+      <default><![CDATA[['<Super><Control><Shift>BackSpace']]]></default>
+      <summary>Remove current appendage workspace.</summary>
+    </key>
+
+  </schema>
+</schemalist>

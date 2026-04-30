@@ -1,0 +1,9 @@
+{
+    "uuid": "workspace-branch@pavel.local",
+    "name": "GNOME Workspace Branch",
+    "description": "Optional vertical appendages above and below the horizontal workspace row.",
+    "shell-version": ["50"],
+    "url": "https://github.com/pavelkhabusov/gnome-workspace-branch",
+    "settings-schema": "org.gnome.shell.extensions.workspace-branch",
+    "gettext-domain": "workspace-branch"
+}
