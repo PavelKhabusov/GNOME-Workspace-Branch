@@ -43,6 +43,24 @@ export default class WorkspaceGridPreferences extends ExtensionPreferences {
         beh.add(forget);
         page.add(beh);
 
+        const ind = new Adw.PreferencesGroup({ title: 'Indicator' });
+        const branched = new Adw.SwitchRow({
+            title: 'Show branches in Activities preview',
+            subtitle: 'Render appendages as vertical bars above/below the native workspace dots. Off — show a separate standalone panel indicator instead.',
+        });
+        settings.bind('branched-indicator', branched, 'active',
+            Gio.SettingsBindFlags.DEFAULT);
+        ind.add(branched);
+
+        const showBranches = new Adw.SwitchRow({
+            title: 'Show vertical branches',
+            subtitle: 'Render the vertical bars for appendages. Off — only the main horizontal row is drawn (clean native look while still using the extension).',
+        });
+        settings.bind('indicator-show-branches', showBranches, 'active',
+            Gio.SettingsBindFlags.DEFAULT);
+        ind.add(showBranches);
+        page.add(ind);
+
         window.add(page);
     }
 

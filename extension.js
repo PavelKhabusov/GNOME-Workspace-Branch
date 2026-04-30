@@ -9,6 +9,7 @@ import { Navigator } from './lib/navigator.js';
 import { Keybindings } from './lib/keybindings.js';
 import { SystemKeys } from './lib/system-keys.js';
 import { Indicator } from './lib/indicator.js';
+import { BranchedIndicator } from './lib/branched-indicator.js';
 import { Swipes } from './lib/swipes.js';
 import * as OverviewPatch from './lib/overview-patch.js';
 import * as AnimationPatch from './lib/animation-patch.js';
@@ -64,8 +65,9 @@ export default class WorkspaceBranchExtension extends Extension {
 
         // Индикатор подписывается на те же сигналы — порядок connect гарантирует,
         // что topology обновится первой, а индикатор отрисует уже актуальное состояние.
-        this._indicator = new Indicator(this._topology);
-        Main.panel.addToStatusArea('workspace-branch', this._indicator);
+        this._installIndicator();
+        this._indicatorSettingId = this._settings.connect('changed::branched-indicator',
+            () => this._reinstallIndicator());
 
         // Замена _thumbnailsBox в overview на наш GridThumbnailsBox для 2D-раскладки и DnD.
         OverviewPatch.install(this._topology, this._ops);
@@ -86,6 +88,29 @@ export default class WorkspaceBranchExtension extends Extension {
 
         // Замена WorkspacesView через subclass+swap для 2D layout.
         WorkspacesViewPatch.install(this._topology);
+    }
+
+    _installIndicator() {
+        if (this._settings.get_boolean('branched-indicator')) {
+            this._branched = new BranchedIndicator(this._topology, this._settings);
+            if (this._branched.install()) return;
+            // Не смогли подцепиться к ActivitiesButton — фолбэк на standalone.
+            this._branched = null;
+        }
+        this._indicator = new Indicator(this._topology);
+        Main.panel.addToStatusArea('workspace-branch', this._indicator);
+    }
+
+    _uninstallIndicator() {
+        this._branched?.uninstall();
+        this._branched = null;
+        this._indicator?.destroy();
+        this._indicator = null;
+    }
+
+    _reinstallIndicator() {
+        this._uninstallIndicator();
+        this._installIndicator();
     }
 
     _restoreAppendages() {
@@ -120,8 +145,11 @@ export default class WorkspaceBranchExtension extends Extension {
         AnimationPatch.uninstall();
         OverviewPatch.uninstall();
 
-        this._indicator?.destroy();
-        this._indicator = null;
+        if (this._indicatorSettingId) {
+            this._settings.disconnect(this._indicatorSettingId);
+            this._indicatorSettingId = 0;
+        }
+        this._uninstallIndicator();
 
         const wm = global.workspace_manager;
         if (this._addedSignal) {

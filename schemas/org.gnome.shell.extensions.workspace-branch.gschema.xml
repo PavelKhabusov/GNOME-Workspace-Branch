@@ -22,6 +22,29 @@
       <summary>Forget empty appendages when the extension is disabled.</summary>
     </key>
 
+    <key name="branched-indicator" type="b">
+      <default>true</default>
+      <summary>Render branches inside the native Activities preview.</summary>
+      <description>
+        When enabled (default), the GNOME Activities workspace dots are
+        replaced with a 2D variant: the main row uses native dots (preserving
+        scale/expansion animations) and small bars above/below each column
+        represent vertical appendages. When disabled, falls back to a separate
+        standalone panel indicator.
+      </description>
+    </key>
+
+    <key name="indicator-show-branches" type="b">
+      <default>true</default>
+      <summary>Show vertical branches in the indicator.</summary>
+      <description>
+        When the Activities indicator is in branched mode, controls whether
+        vertical bars for appendages are shown. When disabled, only the main
+        horizontal row is drawn — useful if you keep using vertical workspaces
+        but prefer a clean, native-looking indicator.
+      </description>
+    </key>
+
     <key name="switch-up" type="as">
       <default><![CDATA[['<Super>Up']]]></default>
       <summary>Switch to workspace above current column.</summary>
