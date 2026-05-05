@@ -147,10 +147,11 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
         const m = rule?.match || {};
         const t = rule?.target || {};
         const parts = [];
-        if (m.wm_class) parts.push(`class: ${m.wm_class}`);
-        if (m.app_id)   parts.push(`id: ${m.app_id}`);
-        if (m.title)    parts.push(`title~ ${m.title}`);
-        if (m.pid_comm) parts.push(`proc: ${m.pid_comm}`);
+        if (m.desktop_id) parts.push(`app: ${m.desktop_id.replace(/\.desktop$/, '')}`);
+        if (m.wm_class)   parts.push(`class: ${m.wm_class}`);
+        if (m.app_id)     parts.push(`id: ${m.app_id}`);
+        if (m.title)      parts.push(`title~ ${m.title}`);
+        if (m.pid_comm)   parts.push(`proc: ${m.pid_comm}`);
         const title = parts.length ? parts.join('  ·  ') : '(empty match)';
 
         const layer = typeof t.layer === 'number' ? t.layer : 0;
@@ -239,6 +240,39 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
             title: 'Match',
             description: 'All filled fields combined with AND. Leave a field empty to ignore it.',
         });
+
+        // Application picker — fastest path: pick from installed .desktop files,
+        // we save desktop_id and match via Shell.WindowTracker at runtime.
+        let pickedDesktopId = existing?.match?.desktop_id ?? '';
+        const appRow = new Adw.ActionRow({
+            title: 'Application',
+            subtitle: pickedDesktopId
+                ? this._desktopRowSubtitle(pickedDesktopId)
+                : 'Pick from installed apps (matches via Shell.WindowTracker).',
+        });
+        const pickBtn = new Gtk.Button({
+            child: new Adw.ButtonContent({
+                icon_name: 'system-search-symbolic',
+                label: 'Choose…',
+            }),
+            css_classes: ['flat'],
+            valign: Gtk.Align.CENTER,
+        });
+        pickBtn.connect('clicked', () => {
+            this._pickApp(parent, pickedDesktopId, (chosen) => {
+                if (chosen === null) return; // cancel
+                if (chosen === '') {
+                    pickedDesktopId = '';
+                    appRow.subtitle = 'Pick from installed apps (matches via Shell.WindowTracker).';
+                    return;
+                }
+                pickedDesktopId = chosen;
+                appRow.subtitle = this._desktopRowSubtitle(chosen);
+            });
+        });
+        appRow.add_suffix(pickBtn);
+        matchGroup.add(appRow);
+
         const wmClass = new Adw.EntryRow({ title: 'WM class (exact)' });
         wmClass.text = existing?.match?.wm_class ?? '';
         matchGroup.add(wmClass);
@@ -292,6 +326,7 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
         dialog.connect('response', (_d, response) => {
             if (response !== 'save') { onDone(null); return; }
             const match = {};
+            if (pickedDesktopId)              match.desktop_id = pickedDesktopId;
             const wm = wmClass.text.trim();   if (wm) match.wm_class = wm;
             const ai = appId.text.trim();     if (ai) match.app_id = ai;
             const ti = titleRe.text.trim();   if (ti) match.title = ti;
@@ -305,6 +340,146 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
                     create_if_missing: createRow.active,
                 },
             });
+        });
+
+        dialog.present(parent);
+    }
+
+    _desktopRowSubtitle(desktopId) {
+        const info = Gio.DesktopAppInfo.new(desktopId);
+        if (!info) return desktopId;
+        return `${info.get_display_name()}  ·  ${desktopId}`;
+    }
+
+    _allApps() {
+        const apps = Gio.AppInfo.get_all().filter(a => {
+            try { return a.should_show && a.should_show(); } catch { return false; }
+        });
+        apps.sort((a, b) => {
+            const an = (a.get_display_name() || '').toLowerCase();
+            const bn = (b.get_display_name() || '').toLowerCase();
+            return an < bn ? -1 : an > bn ? 1 : 0;
+        });
+        return apps;
+    }
+
+    _pickApp(parent, currentDesktopId, onChosen) {
+        // Кастомный диалог: search-entry + scrolled ListBox с иконкой и именем.
+        // Возвращает desktop_id (строка) при выборе, '' при Clear, null при Cancel.
+
+        const dialog = new Adw.AlertDialog({
+            heading: 'Pick application',
+            close_response: 'cancel',
+        });
+        dialog.add_response('cancel', 'Cancel');
+        if (currentDesktopId) dialog.add_response('clear', 'Clear');
+        dialog.set_response_appearance('cancel', Adw.ResponseAppearance.DEFAULT);
+
+        const content = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL,
+            spacing: 8,
+        });
+        const search = new Gtk.SearchEntry({
+            placeholder_text: 'Filter by name or id…',
+        });
+        content.append(search);
+
+        const listBox = new Gtk.ListBox({
+            css_classes: ['boxed-list'],
+            selection_mode: Gtk.SelectionMode.SINGLE,
+        });
+        const scrolled = new Gtk.ScrolledWindow({
+            child: listBox,
+            height_request: 380,
+            min_content_width: 480,
+            hscrollbar_policy: Gtk.PolicyType.NEVER,
+        });
+        content.append(scrolled);
+
+        const apps = this._allApps();
+        let chosenId = null;
+
+        const finish = (id) => {
+            chosenId = id;
+            // Fire response 'save' on row activation.
+            dialog.response('save');
+        };
+
+        for (const app of apps) {
+            const id = app.get_id();
+            if (!id) continue;
+            const name = app.get_display_name() || id;
+
+            const row = new Gtk.ListBoxRow();
+            const box = new Gtk.Box({
+                orientation: Gtk.Orientation.HORIZONTAL,
+                spacing: 12,
+                margin_top: 6, margin_bottom: 6,
+                margin_start: 8, margin_end: 8,
+            });
+
+            const icon = app.get_icon();
+            const img = new Gtk.Image({
+                pixel_size: 28,
+                gicon: icon,
+            });
+            box.append(img);
+
+            const text = new Gtk.Box({
+                orientation: Gtk.Orientation.VERTICAL,
+                hexpand: true,
+            });
+            const nameLabel = new Gtk.Label({
+                label: name, xalign: 0,
+                ellipsize: 3, // PANGO_ELLIPSIZE_END
+            });
+            const idLabel = new Gtk.Label({
+                label: id, xalign: 0,
+                css_classes: ['caption', 'dim-label'],
+                ellipsize: 3,
+            });
+            text.append(nameLabel);
+            text.append(idLabel);
+            box.append(text);
+
+            row.set_child(box);
+            row._desktopId = id;
+            row._needle = `${name.toLowerCase()} ${id.toLowerCase()}`;
+            listBox.append(row);
+
+            if (id === currentDesktopId) {
+                listBox.select_row(row);
+            }
+        }
+
+        // Filtering.
+        listBox.set_filter_func(row => {
+            const q = (search.text || '').trim().toLowerCase();
+            if (!q) return true;
+            return row._needle && row._needle.includes(q);
+        });
+        search.connect('search-changed', () => listBox.invalidate_filter());
+
+        listBox.connect('row-activated', (_lb, row) => {
+            if (row && row._desktopId) finish(row._desktopId);
+        });
+
+        dialog.add_response('save', 'Select');
+        dialog.set_response_appearance('save', Adw.ResponseAppearance.SUGGESTED);
+        dialog.set_default_response('save');
+
+        dialog.set_extra_child(content);
+
+        dialog.connect('response', (_d, response) => {
+            if (response === 'cancel') { onChosen(null); return; }
+            if (response === 'clear')  { onChosen(''); return; }
+            if (response === 'save') {
+                if (chosenId) { onChosen(chosenId); return; }
+                const sel = listBox.get_selected_row();
+                if (sel && sel._desktopId) onChosen(sel._desktopId);
+                else onChosen(null);
+                return;
+            }
         });
 
         dialog.present(parent);
