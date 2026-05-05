@@ -17,8 +17,7 @@ import * as VerticalSwipe from './lib/vertical-swipe.js';
 import * as AutoCleanup from './lib/auto-cleanup.js';
 import * as WorkspacesViewPatch from './lib/workspaces-view-patch.js';
 import * as WindowRules from './lib/window-rules.js';
-import * as Profiles from './lib/profiles.js';
-import { ProfileSwitcher } from './lib/profile-switcher.js';
+import * as Autostart from './lib/autostart.js';
 
 const OUR_KEY_NAMES = [
     'switch-up', 'switch-down', 'switch-left', 'switch-right',
@@ -92,16 +91,10 @@ export default class WorkspaceBranchExtension extends Extension {
         // Замена WorkspacesView через subclass+swap для 2D layout.
         WorkspacesViewPatch.install(this._topology);
 
-        // Window-routing engine + profiles wrapper:
-        // WindowRules держит набор правил в памяти; Profiles резолвит их из
-        // активного профиля или fallback'а и при смене профиля стартует автозапуск.
-        WindowRules.install(this._topology, this._ops);
-        Profiles.install(this._settings);
-
-        // Панельная кнопка для быстрого переключения профилей. Сама прячется,
-        // если в настройках нет ни одного профиля.
-        this._profileSwitcher = new ProfileSwitcher(this._settings);
-        Main.panel.addToStatusArea('workspace-branch-profile', this._profileSwitcher);
+        // Window-routing engine читает правила прямо из window-rules.
+        // Autostart раз за сессию запускает .desktop у правил с autostart=true.
+        WindowRules.install(this._topology, this._ops, this._settings);
+        Autostart.install(this._settings);
     }
 
     _installIndicator() {
@@ -149,9 +142,7 @@ export default class WorkspaceBranchExtension extends Extension {
     }
 
     disable() {
-        this._profileSwitcher?.destroy();
-        this._profileSwitcher = null;
-        Profiles.uninstall();
+        Autostart.uninstall();
         WindowRules.uninstall();
         WorkspacesViewPatch.uninstall();
         AutoCleanup.uninstall();

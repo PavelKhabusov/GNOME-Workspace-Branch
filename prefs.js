@@ -32,7 +32,6 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
         page.add(this._buildIndicator(settings));
         page.add(this._buildRulesGroup(window, settings));
         page.add(this._buildLayoutPreview(settings));
-        page.add(this._buildProfilesGroup(window, settings));
 
         window.add(page);
     }
@@ -252,6 +251,22 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
         colSpin.connect('value-changed', writeTarget);
         layerSpin.connect('value-changed', writeTarget);
 
+        // Autostart toggle: запускает .desktop через Gio.DesktopAppInfo.launch
+        // один раз за сессию (см. lib/autostart.js).
+        const autostartBtn = new Gtk.ToggleButton({
+            icon_name: 'media-playback-start-symbolic',
+            active: !!rule.autostart,
+            tooltip_text: 'Autostart this app on session start',
+            css_classes: ['flat'],
+            valign: Gtk.Align.CENTER,
+        });
+        autostartBtn.connect('toggled', () => {
+            if (rule.autostart === autostartBtn.active) return;
+            rule.autostart = autostartBtn.active;
+            persist();
+        });
+        row.add_suffix(autostartBtn);
+
         row.add_suffix(this._iconButton('document-edit-symbolic', null, onEdit));
         row.add_suffix(this._iconButton('user-trash-symbolic', ['destructive-action'], onDelete));
         return row;
@@ -312,7 +327,7 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
                 if (cachedArr.some(r => r?.match?.desktop_id === id)) return;
                 const rule = {
                     match: { desktop_id: id },
-                    target: { col: 0, layer: 0, create_if_missing: false },
+                    target: { col: 0, layer: 0, create_if_missing: true },
                 };
                 cachedArr.push(rule);
                 persist();
@@ -486,7 +501,7 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
         titleRe.text = existing?.match?.title ?? '';
         matchGroup.add(titleRe);
 
-        const procName = new Adw.EntryRow({ title: 'Process name (/proc/<pid>/comm)' });
+        const procName = new Adw.EntryRow({ title: 'Process name' });
         procName.text = existing?.match?.pid_comm ?? '';
         matchGroup.add(procName);
 
@@ -766,7 +781,15 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
                 rowIdx++;
             }
 
-            wrap.append(grid);
+            const scrolled = new Gtk.ScrolledWindow({
+                hscrollbar_policy: Gtk.PolicyType.AUTOMATIC,
+                vscrollbar_policy: Gtk.PolicyType.NEVER,
+                propagate_natural_width: true,
+                propagate_natural_height: true,
+                hexpand: true,
+                child: grid,
+            });
+            wrap.append(scrolled);
         };
 
         rebuild();
@@ -874,255 +897,4 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
         return frame;
     }
 
-    // ─── profiles ──────────────────────────────────────────────────────
-
-    _profileRow(profile, onEdit, onDelete) {
-        const name = profile?.name || '(unnamed)';
-        const rules = Array.isArray(profile?.rules) ? profile.rules.length : 0;
-        const autostart = Array.isArray(profile?.autostart) ? profile.autostart.length : 0;
-        const subtitle = `${rules} rule(s) · ${autostart} autostart`;
-        const row = new Adw.ActionRow({ title: name, subtitle });
-        row.add_suffix(this._iconButton('document-edit-symbolic', null, onEdit));
-        row.add_suffix(this._iconButton('user-trash-symbolic', ['destructive-action'], onDelete));
-        return row;
-    }
-
-    _activeProfileRow(settings) {
-        const model = new Gtk.StringList({ strings: ['(none)'] });
-        const combo = new Adw.ComboRow({
-            title: 'Active profile',
-            subtitle: 'Profile to apply (none — use the standalone Window rules above).',
-            model,
-        });
-
-        let suppress = false;
-        const sync = () => {
-            let profiles = [];
-            try { profiles = JSON.parse(settings.get_string('profiles')); } catch {}
-            if (!Array.isArray(profiles)) profiles = [];
-            const names = ['(none)', ...profiles.map(p => (p && p.name) || '?')];
-            suppress = true;
-            model.splice(0, model.get_n_items(), names);
-            const active = settings.get_string('active-profile');
-            const idx = active ? profiles.findIndex(p => p && p.name === active) + 1 : 0;
-            combo.selected = Math.max(0, idx);
-            suppress = false;
-        };
-        sync();
-
-        combo.connect('notify::selected', () => {
-            if (suppress) return;
-            const i = combo.selected;
-            if (i === 0) {
-                if (settings.get_string('active-profile') !== '')
-                    settings.set_string('active-profile', '');
-                return;
-            }
-            let profiles = [];
-            try { profiles = JSON.parse(settings.get_string('profiles')); } catch {}
-            if (!Array.isArray(profiles)) return;
-            const target = profiles[i - 1];
-            const name = target && target.name ? target.name : '';
-            if (settings.get_string('active-profile') !== name)
-                settings.set_string('active-profile', name);
-        });
-
-        settings.connect('changed::profiles', sync);
-        settings.connect('changed::active-profile', sync);
-        return combo;
-    }
-
-    _buildProfilesGroup(window, settings) {
-        const group = new Adw.PreferencesGroup({
-            title: 'Profiles',
-            description: 'Bundle rules + autostart commands into a named profile. The active profile overrides the standalone Window rules above.',
-        });
-        const addBtn = this._addButton('Add profile', () => {
-            this._editProfile(window, null, (profile) => {
-                if (!profile) return;
-                const list = this._readArr(settings, 'profiles');
-                list.push(profile);
-                this._writeArr(settings, 'profiles', list);
-            });
-        });
-        group.set_header_suffix(addBtn);
-
-        group.add(this._activeProfileRow(settings));
-
-        let rows = [];
-        const refresh = () => {
-            for (const row of rows) group.remove(row);
-            rows = [];
-            const profiles = this._readArr(settings, 'profiles');
-            if (profiles.length === 0) {
-                const empty = this._emptyRow('No profiles yet', 'Add one to bundle rules + autostart.');
-                rows.push(empty);
-                group.add(empty);
-                return;
-            }
-            profiles.forEach((profile, i) => {
-                const row = this._profileRow(profile,
-                    () => this._editProfile(window, profile, (updated) => {
-                        if (!updated) return;
-                        const list = this._readArr(settings, 'profiles');
-                        list[i] = updated;
-                        this._writeArr(settings, 'profiles', list);
-                    }),
-                    () => {
-                        const list = this._readArr(settings, 'profiles');
-                        list.splice(i, 1);
-                        this._writeArr(settings, 'profiles', list);
-                        if (settings.get_string('active-profile') === (profile?.name ?? ''))
-                            settings.set_string('active-profile', '');
-                    });
-                rows.push(row);
-                group.add(row);
-            });
-        };
-        refresh();
-        settings.connect('changed::profiles', refresh);
-        return group;
-    }
-
-    _editProfile(parent, existing, onDone) {
-        const working = existing
-            ? JSON.parse(JSON.stringify(existing))
-            : { name: '', rules: [], autostart: [] };
-        if (!Array.isArray(working.rules)) working.rules = [];
-        if (!Array.isArray(working.autostart)) working.autostart = [];
-
-        const dialog = new Adw.AlertDialog({
-            heading: existing ? 'Edit profile' : 'Add profile',
-            close_response: 'cancel',
-        });
-        dialog.add_response('cancel', 'Cancel');
-        dialog.add_response('save', 'Save');
-        dialog.set_response_appearance('save', Adw.ResponseAppearance.SUGGESTED);
-
-        const content = new Gtk.Box({
-            orientation: Gtk.Orientation.VERTICAL,
-            spacing: 18,
-            margin_top: 6,
-        });
-
-        const nameGroup = new Adw.PreferencesGroup();
-        const nameRow = new Adw.EntryRow({ title: 'Profile name' });
-        nameRow.text = working.name || '';
-        nameGroup.add(nameRow);
-        content.append(nameGroup);
-
-        // Rules — тот же AMW-стиль ListBox, что и в верхнем уровне.
-        const rulesGroup = new Adw.PreferencesGroup({
-            title: 'Rules',
-            description: 'Routing rules for this profile.',
-        });
-        const { list: rulesList } = this._buildRulesListBox(parent, {
-            getter: () => working.rules,
-            setter: (arr) => { working.rules = arr; },
-        });
-        rulesGroup.add(rulesList);
-        content.append(rulesGroup);
-
-        // Autostart
-        const autoGroup = new Adw.PreferencesGroup({
-            title: 'Autostart',
-            description: 'Commands to run when this profile activates (once per session).',
-        });
-        let autoRows = [];
-        const refreshAuto = () => {
-            for (const r of autoRows) autoGroup.remove(r);
-            autoRows = [];
-            if (working.autostart.length === 0) {
-                const empty = this._emptyRow('No autostart', 'Use Add to create one.');
-                autoRows.push(empty);
-                autoGroup.add(empty);
-                return;
-            }
-            working.autostart.forEach((entry, i) => {
-                const cmd = Array.isArray(entry?.cmd) ? entry.cmd.join(' ') : '(invalid)';
-                const row = new Adw.ActionRow({ title: cmd, subtitle: 'Spawned via Gio.Subprocess (no shell).' });
-                row.add_suffix(this._iconButton('document-edit-symbolic', null, () => {
-                    this._editAutostart(parent, entry, (updated) => {
-                        if (!updated) return;
-                        working.autostart[i] = updated;
-                        refreshAuto();
-                    });
-                }));
-                row.add_suffix(this._iconButton('user-trash-symbolic', ['destructive-action'], () => {
-                    working.autostart.splice(i, 1);
-                    refreshAuto();
-                }));
-                autoRows.push(row);
-                autoGroup.add(row);
-            });
-        };
-        autoGroup.set_header_suffix(this._addButton('Add', () => {
-            this._editAutostart(parent, null, (entry) => {
-                if (!entry) return;
-                working.autostart.push(entry);
-                refreshAuto();
-            });
-        }));
-        refreshAuto();
-        content.append(autoGroup);
-
-        dialog.set_extra_child(content);
-
-        dialog.connect('response', (_d, response) => {
-            if (response !== 'save') { onDone(null); return; }
-            const name = nameRow.text.trim();
-            if (!name) { onDone(null); return; }
-            working.name = name;
-            onDone(working);
-        });
-
-        dialog.present(parent);
-    }
-
-    _editAutostart(parent, existing, onDone) {
-        const dialog = new Adw.AlertDialog({
-            heading: existing ? 'Edit autostart command' : 'Add autostart command',
-            close_response: 'cancel',
-        });
-        dialog.add_response('cancel', 'Cancel');
-        dialog.add_response('save', 'Save');
-        dialog.set_response_appearance('save', Adw.ResponseAppearance.SUGGESTED);
-
-        const content = new Gtk.Box({
-            orientation: Gtk.Orientation.VERTICAL,
-            spacing: 12,
-            margin_top: 6,
-        });
-
-        const grp = new Adw.PreferencesGroup();
-        const cmdRow = new Adw.EntryRow({ title: 'Command (shell-quoted args supported)' });
-        cmdRow.text = Array.isArray(existing?.cmd) ? existing.cmd.join(' ') : '';
-        grp.add(cmdRow);
-        content.append(grp);
-
-        const note = new Gtk.Label({
-            label: 'Examples:  firefox  ·  code --new-window  ·  /usr/bin/foo "with space"',
-            xalign: 0,
-            wrap: true,
-            css_classes: ['dim-label'],
-        });
-        content.append(note);
-
-        dialog.set_extra_child(content);
-
-        dialog.connect('response', (_d, response) => {
-            if (response !== 'save') { onDone(null); return; }
-            const text = cmdRow.text.trim();
-            if (!text) { onDone(null); return; }
-            try {
-                const [ok, argv] = GLib.shell_parse_argv(text);
-                if (!ok || !argv || argv.length === 0) { onDone(null); return; }
-                onDone({ cmd: argv });
-            } catch {
-                onDone(null);
-            }
-        });
-
-        dialog.present(parent);
-    }
 }
