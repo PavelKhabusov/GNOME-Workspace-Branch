@@ -154,6 +154,7 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
         if (m.app_id)     parts.push(`id: ${m.app_id}`);
         if (m.title)      parts.push(`title~ ${m.title}`);
         if (m.pid_comm)   parts.push(`proc: ${m.pid_comm}`);
+        if (rule?.stack)  parts.push('stack ↓');
         const title = parts.length ? parts.join('  ·  ') : '(empty match)';
 
         const layer = typeof t.layer === 'number' ? t.layer : 0;
@@ -528,6 +529,13 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
         });
         targetGroup.add(layerRow);
 
+        const stackRow = new Adw.SwitchRow({
+            title: 'Stack additional windows below',
+            subtitle: 'Each next window of this app goes one layer deeper (+1, +2, …). New appendages are auto-created as needed.',
+            active: !!existing?.stack,
+        });
+        targetGroup.add(stackRow);
+
         content.append(targetGroup);
 
         dialog.set_extra_child(content);
@@ -541,13 +549,15 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
             const ti = titleRe.text.trim();   if (ti) match.title = ti;
             const pc = procName.text.trim();  if (pc) match.pid_comm = pc;
 
-            onDone({
+            const rule = {
                 match,
                 target: {
                     col: colRow.value,
                     layer: layerRow.value,
                 },
-            });
+            };
+            if (stackRow.active) rule.stack = true;
+            onDone(rule);
         });
 
         dialog.present(parent);
