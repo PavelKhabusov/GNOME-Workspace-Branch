@@ -327,7 +327,7 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
                 if (cachedArr.some(r => r?.match?.desktop_id === id)) return;
                 const rule = {
                     match: { desktop_id: id },
-                    target: { col: 0, layer: 0, create_if_missing: true },
+                    target: { col: 0, layer: 0 },
                 };
                 cachedArr.push(rule);
                 persist();
@@ -528,13 +528,6 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
         });
         targetGroup.add(layerRow);
 
-        const createRow = new Adw.SwitchRow({
-            title: 'Create appendage if missing',
-            subtitle: 'Only applies when layer ≠ 0',
-            active: !!existing?.target?.create_if_missing,
-        });
-        targetGroup.add(createRow);
-
         content.append(targetGroup);
 
         dialog.set_extra_child(content);
@@ -553,7 +546,6 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
                 target: {
                     col: colRow.value,
                     layer: layerRow.value,
-                    create_if_missing: createRow.active,
                 },
             });
         });
