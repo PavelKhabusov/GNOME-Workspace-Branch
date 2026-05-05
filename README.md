@@ -38,9 +38,31 @@ top of that, every column can grow up and down with extra workspaces.
   create a new appendage there. Drop at the right end to extend the main row.
 - **App Grid 2D** — the workspaces preview in App Grid mode is laid out as a
   proper grid (cols × layers), not a single horizontal strip.
-- **Panel indicator** — compact mini-map with a click-menu of all workspaces.
+- **Branched indicator** — instead of a separate panel button, the native
+  Activities preview is replaced with a 2D variant: native dots for the main
+  row + small "appendage stripes" stuck above/below them. Falls back to a
+  classic standalone indicator if Activities is unavailable.
+- **Drum-rotation mode** (opt-in) — `Super+Up/Down` rotates the active
+  column like a slot-machine drum so a different appendage becomes the new
+  main, instead of navigating. Active workspace stays on the main row;
+  Mutter is reindexed to keep linear order consistent.
+- **Window routing** (Auto-Move-Windows-style + 2D) — per-app rules send
+  newly created windows to a target `(col, layer)`. Match by `.desktop` id
+  (picked from the native `Gtk.AppChooserDialog`), `wm_class`, regex
+  `title`, or `pid_comm` (process name from `/proc/<pid>/comm`).
+  - **Auto-create**: targets past the current edge auto-extend the main row
+    and auto-create appendages — no need to set up topology first.
+  - **Stack mode**: each next window of the same app drops one layer
+    deeper (`+1`, `+2`, …). Open three VS Code projects → three workspaces
+    in a single column.
+  - **Per-rule autostart**: toggle launches the app once per session via
+    `Shell.App.activate()`, with a fallback to the `.desktop`'s `Exec=` if
+    activate doesn't materialise a window.
+  - **Layout preview** in prefs — a small grid that shows where each rule
+    will land. Drag any icon to retarget it without touching the spinners.
 - **Auto-cleanup** — empty appendages disappear on switch / window close.
-  Main row workspaces are never touched.
+  Empty main columns can also retire (no appendages, ≥ 1 column remains),
+  with the topology re-indexing surviving columns automatically.
 - **Persists** — appendage layout is saved in gsettings and restored after
   shell restart / Wayland re-login.
 
@@ -107,26 +129,38 @@ All bindings are configurable in **Extension preferences**
 reads `org.gnome.shell.extensions.auto-move-windows application-list` —
 pairs of `app.desktop:N` where `N` is a 1-based linear index. This extension:
 
-1. Never reorders the main row, so indices `1..N` keep their meaning.
+1. Never reorders the main row in default mode, so indices `1..N` keep their
+   meaning. (Drum-rotation mode does reindex, opt-in only.)
 2. Appends appendages **at the end** of Mutter's list (`N+1`, `N+2`, …) where
    AMW doesn't look.
-3. Removes only appendages by index, never main-row workspaces, so the
-   trailing tail you control with us, the rest stays as AMW expects.
+3. Removes only appendages by index unless its main column has no
+   appendages and the row would still be non-empty, in which case the
+   topology shrinks main row in a way AMW indices naturally follow.
 
-You don't need to change a single byte of your AMW configuration.
+You don't need to change a single byte of your AMW configuration to keep it
+working alongside this extension. If you want to **switch entirely to our
+routing**, the built-in rule editor covers everything AMW does (pick app
+from the system list, set workspace) plus 2D targets, regex matching, stack
+mode, and autostart.
 
 ## Architecture
 
 ```
 extension.js         # ESM Extension class, enable/disable, signal wiring
-prefs.js             # Adw preferences (keybindings + behavior)
+prefs.js             # Adw preferences (keybindings, behavior, rules editor,
+                     # layout preview with DnD)
 lib/
-  topology.js        # ColumnTopology — single source of truth (col, layer)
-  navigator.js       # switchUp/Down/Left/Right, moveWindow*, removeCurrent
-  workspaces.js      # CRUD over Mutter workspaces (append/remove)
+  topology.js        # ColumnTopology — single source of truth (col, layer);
+                     # rotation, removeMainColumn, columnHasAppendages
+  navigator.js       # switchUp/Down/Left/Right, moveWindow*, removeCurrent;
+                     # drum-rotation dispatch when 'drum-rotation' is on
+  workspaces.js      # CRUD over Mutter (append + reorder for static-mode
+                     # extends, removeMainColumn, rotateColumn)
   keybindings.js     # Meta keybinding registration
   system-keys.js     # release conflicting native shortcuts on enable
-  indicator.js       # panel mini-map + click menu
+  indicator.js       # standalone panel mini-map (used as fallback)
+  branched-indicator.js
+                     # native Activities preview replacement: dots + stripes
   swipes.js          # 4F touchpad ladder + Super+scroll + panel scroll
   vertical-swipe.js  # 3F vertical swipe (own SwipeTracker over column stack)
   vertical-monitor-group.js
@@ -137,13 +171,20 @@ lib/
   workspaces-view-patch.js
                      # WorkspacesView swap — 2D layout in overview
   overview-patch.js  # swap _thumbnailsBox in overview controls
-  auto-cleanup.js    # remove empty appendages on switch / window close
+  auto-cleanup.js    # remove empty appendages and main columns; chain prune
+  window-rules.js    # routing engine: matches windows on display::
+                     # window-created and moves them to (col, layer); auto-
+                     # extends main row and auto-creates appendages; stack mode
+  autostart.js       # per-rule autostart: Shell.App.activate() / launch() /
+                     # Gio.Subprocess fallback; once per session
 schemas/
   org.gnome.shell.extensions.workspace-branch.gschema.xml
 metadata.json        # shell-version: ["50"]
 Makefile             # install / pack / test
 tests/
   topology-test.js   # standalone gjs unit tests for the topology layer
+                     # (load, neighbor, register/unregister, columnHas-
+                     # Appendages, removeMainColumn, computeRotation, …)
 ```
 
 The model is a small, testable core (`Topology`) plus a set of GNOME Shell
@@ -194,6 +235,13 @@ get stuck in an old GType state otherwise.
   far-apart appendages this can produce a brief diagonal slide when shell
   smoothly eases the value through intermediate indices.
 - Topology is global, not per-monitor.
+- GJS caches ES modules across `gnome-extensions disable && enable`. Code
+  changes inside `lib/*.js` take effect only after a full shell restart
+  (logout / login on Wayland). Settings changes (rules, keybindings,
+  toggles) reload immediately.
+- Tray-only apps in autostart: if the launched app stays in its own tray
+  (e.g. Telegram with `-autostart`), `Shell.App.activate()` cannot pull
+  the window out — disable the tray-on-start option in the app itself.
 
 ## License
 

@@ -159,35 +159,51 @@ prune(wsIdx): void                        // вызывать на workspace-rem
 
 ## 4. Этапы
 
-### Фаза 1 — MVP
-- [ ] Скаффолд (metadata.json, extension.js ESM, schema, Makefile)
-- [ ] Topology + persist в gsettings
-- [ ] Команды: switchUp/Down, createAbove(currentCol), createBelow(currentCol), removeCurrent
-- [ ] 4 биндинга: up/down/create-up/create-down
-- [ ] Подписка на `workspace-added/removed` для синхронизации
-- [ ] Тест-сценарий ниже проходит
+### Фаза 1 — MVP ✅
+- [x] Скаффолд (metadata.json, extension.js ESM, schema, Makefile)
+- [x] Topology + persist в gsettings
+- [x] Команды: switchUp/Down, createAbove/Below, removeCurrent, extendRowRight, moveWindow*
+- [x] Биндинги: up/down/left/right + create-up/create-down + extend-row-right + move-window-* + remove-current
+- [x] Подписка на `workspace-added/removed`
+- [x] Восстановление отростков после Wayland-релогина
 
-**Критерий приёмки:** Главный ряд из 4 воркспейсов с привязками AMW. Я на воркспейсе 2, жму `Super+Ctrl+Up` — создаётся отросток сверху, я на нём. `Super+Down` возвращает на 2. `Super+Right` — на 3. Привязки AMW (Firefox→2, Telegram→3) продолжают работать. Перезапуск GNOME Shell — отростки восстанавливаются из gsettings.
+### Фаза 2 — Overview integration ✅
+- [x] `GridThumbnailsBox` — субкласс `ThumbnailsBox`, 2D-раскладка + DnD-зоны над/под колонкой и в конце ряда (extend main row).
+- [x] `GridWorkspacesView` — 2D в overview с вертикальными колонками.
+- [x] `OverviewPatch` свапает `_thumbnailsBox` через subclass, корректный teardown в `disable()`.
 
-### Фаза 2 — Overview integration (приоритет!)
-- [ ] Изучить актуальный `js/ui/workspaceThumbnail.js` под GNOME 50 (распаковать gresource)
-- [ ] Рендер существующих отростков как thumbnail-ов над/под главным рядом
-- [ ] Drop-placeholder сверху и снизу каждой колонки при drag окна
-- [ ] `_acceptDrop` создаёт отросток и переносит окно
-- [ ] Клик по thumbnail отростка → switch на него
-- [ ] Откат monkey-patch при `disable()`
+### Фаза 3 — UX полировка ✅
+- [x] Move window клавишами (`Super+Shift+Up/Down/Left/Right`).
+- [x] Standalone панельная мини-карта (`Indicator`) — fallback.
+- [x] Branched-indicator: подмена нативного `WorkspaceIndicators` в `ActivitiesButton`. Натив. WorkspaceDot для main, мини-stripe-pill'ы (приклеены к видимому краю pill'а) для отростков. Читает scaleX/scaleY дота, переезжает за expansion-анимацией.
+- [x] Variant A (left/right в отростке снапается на main соседней колонки) — реализовано в `Topology.neighbor`. Variant B остаётся опциональным расширением.
+- [x] Auto-cleanup отростков и main-row: `lib/auto-cleanup.js`. Цепная очистка по колонке, переиндексация appendages при `removeMainColumn(col)`.
+- [x] Drum-rotation mode (settings `drum-rotation`, default off): `Super+Up/Down` физически переставляет ws через `reorder_workspace`, активный остаётся в main-row.
 
-**Критерий приёмки:** В overview видно главный ряд + у воркспейса 2 один отросток сверху (если был создан). Перетаскиваю окно над колонкой 3 → появляется точечка → дроп → создаётся новый воркспейс над колонкой 3, окно в нём, в overview виден новый thumbnail.
+### Фаза 4 — Анимация ✅ (частично)
+- [x] Vertical slide через `VerticalMonitorGroup` + патч `animateSwitch` (горизонтальный slide пропускается для main↔отросток).
+- [x] 3-finger vertical swipe + Super+scroll → switchUp/Down (own `SwipeTracker`).
+- [x] 4-finger ladder вверх → overview → app grid; вниз — обратно.
+- [ ] (опц.) интеграция с Desktop Cube для главного ряда — отложено.
 
-### Фаза 3 — UX полировка
-- [ ] Move window вверх/вниз с клавиатуры
-- [ ] Панельная мини-карта (горизонтальная полоска + точки над/под)
-- [ ] Адекватное поведение при ручных манипуляциях с воркспейсами через GNOME
-- [ ] Опция «left/right в отростке = соседний отросток той же глубины (вариант B)»
+### Фаза 5 — Window routing & autostart ✅
+- [x] `lib/window-rules.js` — engine, слушает `display::window-created`, матчит по AND из {`desktop_id` (через Shell.WindowTracker), `wm_class`, `app_id`, `title` regex, `pid_comm` из /proc/PID/comm}.
+- [x] Auto-extend main row (`workspace_manager.append_new_workspace` + `reorder_workspace` — потому что `Main.wm.insertWorkspace` no-op в static-режиме, который мы форсим).
+- [x] Auto-create отростков для слоёв ±N (loop с safety=32).
+- [x] `stack: true` — каждое следующее окно того же `desktop_id` едет глубже на одну ступеньку.
+- [x] `lib/autostart.js` — per-rule `autostart: true`. Один раз за сессию (маркер в `$XDG_RUNTIME_DIR/.../launched-this-session`).
+  - Если у app уже есть видимое окно (skip_taskbar=false) — пропускаем.
+  - STOPPED → `Shell.App.activate()` (умеет в D-Bus и в Exec).
+  - RUNNING без окна (Telegram-tray) → activate.
+  - Если activate ничего не сделал и state остался STOPPED — fallback на `Gio.Subprocess.new(argv)` с очищенными `%fFuU` placeholders.
+- [x] Prefs: визуальный редактор правил (Adw.AlertDialog с формой, Adw.SwitchRow для stack, Gtk.ToggleButton для autostart inline в строке).
+- [x] App picker через `Gtk.AppChooserDialog` (то же, что использует AMW).
+- [x] Surgical add/edit/delete в ListBox (без full refresh — спиннеры не моргают, скролл не скачет).
+- [x] Защита от дублей (`set_response_sensitive(OK, !blocked)`).
+- [x] Layout preview: 2D-сетка ячеек `(col, layer)` с иконками правил, DnD для retarget'а правила в другую ячейку. Учитывает `target.col` правил, не только `mainRowSize`.
 
-### Фаза 4 — Анимация
-- [ ] Slide вверх/вниз поверх стандартного слайда влево/вправо (через WorkspaceAnimationController)
-- [ ] (опц.) интеграция / совместимость с Desktop Cube для главного ряда
+### Фаза 6 — Profiles (отложено) ⏸
+Изначально планировались набор профилей (Work / Gaming) с собственным window-rules + autostart-командами и переключателем в панели. Код есть в `lib/profiles.js` и `lib/profile-switcher.js`, схема ключи `profiles` + `active-profile` сохранены, но UI убран и инсталляция профилей отключена в `extension.js`. Плановый ребут после стабилизации per-rule autostart.
 
 ---
 
@@ -220,9 +236,18 @@ UUID: `workspace-branch@pavel.local` (поменять на github-домен п
 
 ## 7. Открытые вопросы
 
-1. Дефолт left/right в отростке: снапаться на главный ряд (A) или ходить по соседним отросткам (B)? — **предлагаю A**.
-2. Создание отростка автоматическое (`Super+Up` на пустом → создать) или строго отдельным `Super+Ctrl+Up`? — **строго отдельный**, чтобы не было сюрпризов.
-3. Лимит глубины отростков? — мягкий (warning после, скажем, 5 уровней), без жёсткого.
-4. Хранить topology per-monitor или глобально? — **глобально** для MVP.
-5. Восстановление после reboot: воркспейсы Mutter не сохраняются между сессиями. На следующий вход нужно либо пересоздавать отростки из gsettings (тогда пользователь увидит лишние пустые воркспейсы), либо забывать их. — **предлагаю пересоздавать**, с опцией «забывать пустые».
-6. В overview — лимит видимых отростков на колонку (скролл/clamp)? Предлагаю clamp на 3 видимых сверху и снизу, остальные — через keyboard.
+1. Дефолт left/right в отростке: снапаться на главный ряд (A) или ходить по соседним отросткам (B)? — **A** реализован, B остаётся опциональным.
+2. Создание отростка автоматическое (`Super+Up` на пустом → создать) или строго отдельным `Super+Ctrl+Up`? — **строго отдельный**. Дополнительно: `Super+Shift+Up/Down` создаёт отросток на лету при `move-window`, если в направлении нет слоя.
+3. Лимит глубины отростков? — `MAX_LAYERS = 2` для рендера в branched-indicator (overflow guard), сама топология без жёстких ограничений.
+4. Хранить topology per-monitor или глобально? — **глобально**.
+5. Восстановление после reboot: ✅ пересоздаём в `_restoreAppendages()`, опция `forget-empty-on-disable` для забывания.
+6. В overview — лимит видимых отростков на колонку (скролл/clamp)? — пока без скролла, отображаются все.
+7. Drum-mode: автосоздаваемая ws при rotation — пока нет, drum работает только если есть существующий слой `+1` в направлении. Можно добавить «авто-create отростка при первом drum-rotate».
+8. Layout preview: добавить визуализацию того, какие именно окна сейчас лежат где (живые скриншоты), а не только иконки правил? Пока — только rules.
+
+## 8. Заметки по релизу
+
+- GJS кэширует ES-модули между `gnome-extensions disable && enable`. Изменения в `lib/*.js` подхватываются только после полного рестарта shell (logout/login на Wayland). Settings-изменения подхватываются на лету.
+- В static-режиме (`mutter dynamic-workspaces=false`, который мы форсим в `enable()`) `Main.wm.insertWorkspace` no-op — используем `workspace_manager.append_new_workspace` + `reorder_workspace` напрямую.
+- Для D-Bus-activatable приложений (Telegram) `Gio.DesktopAppInfo.launch` иногда возвращает success без фактического запуска. `Shell.App.activate()` надёжнее, плюс fallback на Subprocess.
+- Tray-only режим (Telegram `-autostart`): activate не вытаскивает окно, нужно отключить в самом приложении.
