@@ -18,6 +18,7 @@ import * as AutoCleanup from './lib/auto-cleanup.js';
 import * as WorkspacesViewPatch from './lib/workspaces-view-patch.js';
 import * as WindowRules from './lib/window-rules.js';
 import * as Profiles from './lib/profiles.js';
+import { ProfileSwitcher } from './lib/profile-switcher.js';
 
 const OUR_KEY_NAMES = [
     'switch-up', 'switch-down', 'switch-left', 'switch-right',
@@ -96,6 +97,11 @@ export default class WorkspaceBranchExtension extends Extension {
         // активного профиля или fallback'а и при смене профиля стартует автозапуск.
         WindowRules.install(this._topology, this._ops);
         Profiles.install(this._settings);
+
+        // Панельная кнопка для быстрого переключения профилей. Сама прячется,
+        // если в настройках нет ни одного профиля.
+        this._profileSwitcher = new ProfileSwitcher(this._settings);
+        Main.panel.addToStatusArea('workspace-branch-profile', this._profileSwitcher);
     }
 
     _installIndicator() {
@@ -143,6 +149,8 @@ export default class WorkspaceBranchExtension extends Extension {
     }
 
     disable() {
+        this._profileSwitcher?.destroy();
+        this._profileSwitcher = null;
         Profiles.uninstall();
         WindowRules.uninstall();
         WorkspacesViewPatch.uninstall();
