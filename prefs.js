@@ -723,6 +723,16 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
             if (!Array.isArray(appendages)) appendages = [];
             const rules = this._readArr(settings, 'window-rules');
 
+            // Диапазон колонок = max(mainRowSize - 1, max(rule.target.col)).
+            // Так превью показывает ВСЕ воркспейсы, в которые правила собираются
+            // отправлять окна, даже если main row ещё не растянут до них.
+            let maxCol = mainRowSize - 1;
+            for (const r of rules) {
+                const c = r?.target?.col ?? 0;
+                if (c > maxCol) maxCol = Math.min(c, mainRowSize + 31);
+            }
+            const colCount = Math.max(1, maxCol + 1);
+
             // Диапазон слоёв = max глубина из appendages + max от target'ов.
             let minLayer = 0, maxLayer = 0;
             for (const a of appendages) {
@@ -731,12 +741,8 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
             }
             for (const r of rules) {
                 const l = r?.target?.layer ?? 0;
-                if (l < minLayer) minLayer = Math.max(l, -3); // clamp
+                if (l < minLayer) minLayer = Math.max(l, -3);
                 if (l > maxLayer) maxLayer = Math.min(l, 3);
-            }
-            // Гарантируем хоть одну строку (main).
-            if (minLayer === 0 && maxLayer === 0) {
-                // OK, just main row.
             }
 
             const grid = new Gtk.Grid({
@@ -746,7 +752,7 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
             });
 
             // Header: col labels.
-            for (let c = 0; c < mainRowSize; c++) {
+            for (let c = 0; c < colCount; c++) {
                 const l = new Gtk.Label({
                     label: `col ${c}`,
                     css_classes: ['caption', 'dim-label'],
@@ -767,7 +773,7 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
                 });
                 grid.attach(layerLbl, 0, rowIdx, 1, 1);
 
-                for (let c = 0; c < mainRowSize; c++) {
+                for (let c = 0; c < colCount; c++) {
                     grid.attach(this._previewCell(settings, c, layer, rules), c + 1, rowIdx, 1, 1);
                 }
                 rowIdx++;
