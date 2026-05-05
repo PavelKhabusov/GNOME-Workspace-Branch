@@ -166,7 +166,10 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
 
     // AMW-стиль: иконка + имя + col/layer + edit + delete.
     // edit открывает «продвинутый» диалог с regexp/wm_class/etc.
-    _ruleRow(rule, getter, setter, onEdit, onDelete) {
+    // `persist()` вызывается после inline-правки col/layer — пишет текущее
+    // in-memory состояние массива в storage. Никакого refresh — UI остаётся
+    // на месте, скролл и фокус сохраняются.
+    _ruleRow(rule, persist, onEdit, onDelete) {
         const m = rule?.match || {};
         const t = rule?.target || {};
 
@@ -235,14 +238,13 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
         wrap.append(layerSpin);
         row.add_suffix(wrap);
 
-        // Изменения col/layer пишем в getter/setter.
+        // Изменения col/layer мутируют `rule` напрямую — он же объект из
+        // массива, который сохраняется через persist().
         const writeTarget = () => {
-            const list = getter();
-            if (!list || !list[row._idx]) return;
-            list[row._idx].target ??= {};
-            list[row._idx].target.col = colSpin.value;
-            list[row._idx].target.layer = layerSpin.value;
-            setter(list);
+            rule.target ??= {};
+            rule.target.col = colSpin.value;
+            rule.target.layer = layerSpin.value;
+            persist();
         };
         colSpin.connect('value-changed', writeTarget);
         layerSpin.connect('value-changed', writeTarget);
@@ -253,49 +255,83 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
     }
 
     _buildRulesListBox(window, opts) {
-        // opts.getter: () => array
-        // opts.setter: (array) => void   (write only — refresh не вызывается)
+        // opts.getter: () => array (читает текущее состояние из storage)
+        // opts.setter: (array) => void (пишет состояние в storage)
         // Возвращает { list, refresh }.
+        //
+        // Внутри держим cachedArr — живой массив, по которому строится UI.
+        // Add/edit/delete мутируют cachedArr и хирургически правят ListBox
+        // (insert/remove одной строки), без пересборки всего списка —
+        // скролл и фокус сохраняются. Spinner-правки тоже мутируют cachedArr
+        // через rule-ссылку и persist'ят, без перерендера.
+        // refresh() — только для внешних импортов / ручных правок storage.
+        let cachedArr = opts.getter();
+
         const list = new Gtk.ListBox({
             selection_mode: Gtk.SelectionMode.NONE,
             css_classes: ['boxed-list'],
         });
-        let refresh;
-        refresh = () => {
-            while (list.get_first_child()) list.remove(list.get_first_child());
-            const rules = opts.getter();
-            rules.forEach((rule, i) => {
-                const row = this._ruleRow(rule, opts.getter, opts.setter,
-                    () => this._editRule(window, rule, (updated) => {
-                        if (!updated) return;
-                        const arr = opts.getter();
-                        arr[i] = updated;
-                        opts.setter(arr);
-                        refresh();
-                    }),
-                    () => {
-                        const arr = opts.getter();
-                        arr.splice(i, 1);
-                        opts.setter(arr);
-                        refresh();
-                    });
-                row._idx = i;
-                list.append(row);
-            });
-            list.append(this._buildAddRow(window, () => {
-                this._pickAppNative(window, '', (id) => {
-                    if (!id) return;
-                    const arr = opts.getter();
-                    arr.push({
-                        match: { desktop_id: id },
-                        target: { col: 0, layer: 0, create_if_missing: false },
-                    });
-                    opts.setter(arr);
-                    refresh();
+
+        const persist = () => opts.setter(cachedArr);
+
+        let addRow = null;
+
+        const buildRow = (rule) => {
+            let row;
+            const onEdit = () => {
+                this._editRule(window, rule, (updated) => {
+                    if (!updated) return;
+                    const idx = cachedArr.indexOf(rule);
+                    if (idx < 0) return;
+                    cachedArr[idx] = updated;
+                    persist();
+                    const newRow = buildRow(updated);
+                    list.insert(newRow, idx);
+                    list.remove(row);
                 });
-            }));
+            };
+            const onDelete = () => {
+                const idx = cachedArr.indexOf(rule);
+                if (idx < 0) return;
+                cachedArr.splice(idx, 1);
+                persist();
+                list.remove(row);
+            };
+            row = this._ruleRow(rule, persist, onEdit, onDelete);
+            return row;
         };
-        refresh();
+
+        const buildAddRow = () => this._buildAddRow(window, () => {
+            const blocked = new Set(
+                cachedArr.map(r => r?.match?.desktop_id).filter(Boolean));
+            this._pickAppNative(window, blocked, (id) => {
+                if (!id) return;
+                if (cachedArr.some(r => r?.match?.desktop_id === id)) return;
+                const rule = {
+                    match: { desktop_id: id },
+                    target: { col: 0, layer: 0, create_if_missing: false },
+                };
+                cachedArr.push(rule);
+                persist();
+                // Surgical insert: новая строка идёт перед addRow, остальные
+                // строки и addRow остаются на своих местах — никакого скачка.
+                list.insert(buildRow(rule), cachedArr.length - 1);
+            });
+        });
+
+        const initial = () => {
+            cachedArr.forEach(rule => list.append(buildRow(rule)));
+            addRow = buildAddRow();
+            list.append(addRow);
+        };
+        initial();
+
+        const refresh = () => {
+            cachedArr = opts.getter();
+            while (list.get_first_child()) list.remove(list.get_first_child());
+            initial();
+        };
+
         return { list, refresh };
     }
 
@@ -308,12 +344,83 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
         // Без auto-refresh от changed::window-rules: spinner-правки не должны
         // пересобирать строки и дёргать фокус. Add/edit/delete вызывают refresh
         // явно из коллбэков.
-        const { list } = this._buildRulesListBox(window, {
+        const { list, refresh } = this._buildRulesListBox(window, {
             getter: () => this._readArr(settings, 'window-rules'),
             setter: (arr) => this._writeArr(settings, 'window-rules', arr),
         });
+
+        const importBtn = new Gtk.Button({
+            child: new Adw.ButtonContent({
+                icon_name: 'document-open-symbolic',
+                label: 'Import from AMW',
+            }),
+            tooltip_text: 'Import the application list from the Auto Move Windows extension.',
+            css_classes: ['flat'],
+            valign: Gtk.Align.CENTER,
+        });
+        importBtn.connect('clicked', () => this._importFromAMW(window, settings, refresh));
+        group.set_header_suffix(importBtn);
+
         group.add(list);
         return group;
+    }
+
+    _importFromAMW(window, settings, refresh) {
+        // Читаем application-list напрямую через extension's compiled schema.
+        const schemaDir = '/home/' + GLib.get_user_name() +
+            '/.local/share/gnome-shell/extensions/' +
+            'auto-move-windows@gnome-shell-extensions.gcampax.github.com/schemas';
+        let amwList = [];
+        try {
+            const file = Gio.File.new_for_path(`${schemaDir}/gschemas.compiled`);
+            if (!file.query_exists(null))
+                throw new Error('AMW schema not found');
+            const source = Gio.SettingsSchemaSource.new_from_directory(
+                schemaDir, Gio.SettingsSchemaSource.get_default(), false);
+            const schema = source.lookup(
+                'org.gnome.shell.extensions.auto-move-windows', false);
+            if (!schema) throw new Error('AMW schema lookup failed');
+            const amw = new Gio.Settings({ settings_schema: schema });
+            amwList = amw.get_strv('application-list') || [];
+        } catch (e) {
+            this._toast(window, `AMW config not available: ${e.message}`);
+            return;
+        }
+
+        const ours = this._readArr(settings, 'window-rules');
+        const seen = new Set(ours.map(r => r?.match?.desktop_id).filter(Boolean));
+        let added = 0;
+        for (const entry of amwList) {
+            const colon = entry.lastIndexOf(':');
+            if (colon < 0) continue;
+            const id = entry.slice(0, colon);
+            const ws = parseInt(entry.slice(colon + 1), 10);
+            if (!id || isNaN(ws) || ws < 1) continue;
+            if (seen.has(id)) continue;
+            ours.push({
+                match: { desktop_id: id },
+                target: { col: ws - 1, layer: 0, create_if_missing: false },
+            });
+            seen.add(id);
+            added++;
+        }
+        if (added > 0) {
+            this._writeArr(settings, 'window-rules', ours);
+            refresh();
+            this._toast(window, `Imported ${added} rule(s) from Auto Move Windows.`);
+        } else {
+            this._toast(window, 'Nothing to import (already migrated, or AMW empty).');
+        }
+    }
+
+    _toast(window, msg) {
+        try {
+            if (window && window.add_toast) {
+                window.add_toast(new Adw.Toast({ title: msg, timeout: 4 }));
+                return;
+            }
+        } catch {}
+        log(`[workspace-branch prefs] ${msg}`);
     }
 
     _buildAddRow(window, onActivate) {
@@ -332,7 +439,7 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
         return row;
     }
 
-    _pickAppNative(parent, currentDesktopId, onChosen) {
+    _pickAppNative(parent, blockedIds, onChosen) {
         const root = parent.get_root ? parent.get_root() : parent;
         const dialog = new Gtk.AppChooserDialog({
             transient_for: root,
@@ -340,10 +447,25 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
         });
         const widget = dialog.get_widget();
         widget.set({ show_all: true, show_other: true });
+
+        const blocked = blockedIds instanceof Set
+            ? blockedIds
+            : new Set(blockedIds || []);
+
+        const updateSensitivity = () => {
+            const info = widget.get_app_info();
+            const id = info ? info.get_id() : null;
+            dialog.set_response_sensitive(Gtk.ResponseType.OK,
+                !!(id && !blocked.has(id)));
+        };
+        widget.connect('application-selected', updateSensitivity);
         widget.connect('application-activated', () => {
             const info = widget.get_app_info();
-            dialog.response(Gtk.ResponseType.OK);
+            const id = info ? info.get_id() : null;
+            if (id && !blocked.has(id)) dialog.response(Gtk.ResponseType.OK);
         });
+        updateSensitivity();
+
         dialog.connect('response', (_d, response) => {
             const info = widget.get_app_info();
             dialog.destroy();
