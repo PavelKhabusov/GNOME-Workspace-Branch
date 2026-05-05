@@ -164,61 +164,196 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
         return { title, subtitle };
     }
 
-    _ruleRow(rule, onEdit, onDelete) {
-        const s = this._ruleSummary(rule);
-        const row = new Adw.ActionRow({ title: s.title, subtitle: s.subtitle });
+    // AMW-стиль: иконка + имя + col/layer + edit + delete.
+    // edit открывает «продвинутый» диалог с regexp/wm_class/etc.
+    _ruleRow(rule, getter, setter, onEdit, onDelete) {
+        const m = rule?.match || {};
+        const t = rule?.target || {};
+
+        const row = new Adw.ActionRow({ activatable: false });
+        let icon = null;
+        if (m.desktop_id) {
+            const info = Gio.DesktopAppInfo.new(m.desktop_id);
+            if (info) {
+                icon = info.get_icon();
+                row.title = info.get_display_name();
+            } else {
+                row.title = `(missing: ${m.desktop_id})`;
+            }
+        }
+        if (!row.title) row.title = this._ruleSummary(rule).title;
+
+        // Подзаголовок: тонкие совпадения сверх app, либо «direct match».
+        const advParts = [];
+        if (m.wm_class) advParts.push(`class: ${m.wm_class}`);
+        if (m.app_id)   advParts.push(`id: ${m.app_id}`);
+        if (m.title)    advParts.push(`title~ ${m.title}`);
+        if (m.pid_comm) advParts.push(`proc: ${m.pid_comm}`);
+        if (advParts.length) row.subtitle = advParts.join('  ·  ');
+
+        const img = new Gtk.Image({
+            css_classes: ['icon-dropshadow'],
+            gicon: icon ?? Gio.ThemedIcon.new('application-x-executable'),
+            pixel_size: 32,
+        });
+        row.add_prefix(img);
+
+        // col / layer spinners.
+        const wrap = new Gtk.Box({
+            orientation: Gtk.Orientation.HORIZONTAL,
+            spacing: 6,
+            valign: Gtk.Align.CENTER,
+        });
+
+        const labelCol = new Gtk.Label({
+            label: 'col',
+            css_classes: ['caption', 'dim-label'],
+        });
+        wrap.append(labelCol);
+        const colSpin = new Gtk.SpinButton({
+            adjustment: new Gtk.Adjustment({
+                lower: 0, upper: 99, step_increment: 1, value: t.col ?? 0,
+            }),
+            valign: Gtk.Align.CENTER,
+            width_chars: 3,
+        });
+        wrap.append(colSpin);
+
+        const labelLayer = new Gtk.Label({
+            label: 'layer',
+            css_classes: ['caption', 'dim-label'],
+            margin_start: 6,
+        });
+        wrap.append(labelLayer);
+        const layerSpin = new Gtk.SpinButton({
+            adjustment: new Gtk.Adjustment({
+                lower: -10, upper: 10, step_increment: 1, value: t.layer ?? 0,
+            }),
+            valign: Gtk.Align.CENTER,
+            width_chars: 3,
+        });
+        wrap.append(layerSpin);
+        row.add_suffix(wrap);
+
+        // Изменения col/layer пишем в getter/setter.
+        const writeTarget = () => {
+            const list = getter();
+            if (!list || !list[row._idx]) return;
+            list[row._idx].target ??= {};
+            list[row._idx].target.col = colSpin.value;
+            list[row._idx].target.layer = layerSpin.value;
+            setter(list);
+        };
+        colSpin.connect('value-changed', writeTarget);
+        layerSpin.connect('value-changed', writeTarget);
+
         row.add_suffix(this._iconButton('document-edit-symbolic', null, onEdit));
         row.add_suffix(this._iconButton('user-trash-symbolic', ['destructive-action'], onDelete));
-        row.activatable_widget = row.get_first_child(); // not strictly needed; prevents double-edit on row click
         return row;
+    }
+
+    _buildRulesListBox(window, opts) {
+        // opts.getter: () => array
+        // opts.setter: (array) => void   (write only — refresh не вызывается)
+        // Возвращает { list, refresh }.
+        const list = new Gtk.ListBox({
+            selection_mode: Gtk.SelectionMode.NONE,
+            css_classes: ['boxed-list'],
+        });
+        let refresh;
+        refresh = () => {
+            while (list.get_first_child()) list.remove(list.get_first_child());
+            const rules = opts.getter();
+            rules.forEach((rule, i) => {
+                const row = this._ruleRow(rule, opts.getter, opts.setter,
+                    () => this._editRule(window, rule, (updated) => {
+                        if (!updated) return;
+                        const arr = opts.getter();
+                        arr[i] = updated;
+                        opts.setter(arr);
+                        refresh();
+                    }),
+                    () => {
+                        const arr = opts.getter();
+                        arr.splice(i, 1);
+                        opts.setter(arr);
+                        refresh();
+                    });
+                row._idx = i;
+                list.append(row);
+            });
+            list.append(this._buildAddRow(window, () => {
+                this._pickAppNative(window, '', (id) => {
+                    if (!id) return;
+                    const arr = opts.getter();
+                    arr.push({
+                        match: { desktop_id: id },
+                        target: { col: 0, layer: 0, create_if_missing: false },
+                    });
+                    opts.setter(arr);
+                    refresh();
+                });
+            }));
+        };
+        refresh();
+        return { list, refresh };
     }
 
     _buildRulesGroup(window, settings) {
         const group = new Adw.PreferencesGroup({
             title: 'Window rules',
-            description: 'Auto-route windows to (col, layer) on creation. Used as a fallback when no profile is active. First match wins.',
+            description: 'Auto-route windows by application. First match wins. Used as a fallback when no profile is active.',
         });
-        const addBtn = this._addButton('Add rule', () => {
-            this._editRule(window, null, (rule) => {
-                if (!rule) return;
-                const list = this._readArr(settings, 'window-rules');
-                list.push(rule);
-                this._writeArr(settings, 'window-rules', list);
-            });
-        });
-        group.set_header_suffix(addBtn);
 
-        let rows = [];
-        const refresh = () => {
-            for (const row of rows) group.remove(row);
-            rows = [];
-            const rules = this._readArr(settings, 'window-rules');
-            if (rules.length === 0) {
-                const empty = this._emptyRow('No rules yet', 'Click Add rule to create one.');
-                rows.push(empty);
-                group.add(empty);
-                return;
-            }
-            rules.forEach((rule, i) => {
-                const row = this._ruleRow(rule,
-                    () => this._editRule(window, rule, (updated) => {
-                        if (!updated) return;
-                        const list = this._readArr(settings, 'window-rules');
-                        list[i] = updated;
-                        this._writeArr(settings, 'window-rules', list);
-                    }),
-                    () => {
-                        const list = this._readArr(settings, 'window-rules');
-                        list.splice(i, 1);
-                        this._writeArr(settings, 'window-rules', list);
-                    });
-                rows.push(row);
-                group.add(row);
-            });
-        };
-        refresh();
-        settings.connect('changed::window-rules', refresh);
+        // Без auto-refresh от changed::window-rules: spinner-правки не должны
+        // пересобирать строки и дёргать фокус. Add/edit/delete вызывают refresh
+        // явно из коллбэков.
+        const { list } = this._buildRulesListBox(window, {
+            getter: () => this._readArr(settings, 'window-rules'),
+            setter: (arr) => this._writeArr(settings, 'window-rules', arr),
+        });
+        group.add(list);
         return group;
+    }
+
+    _buildAddRow(window, onActivate) {
+        const row = new Gtk.ListBoxRow({
+            child: new Gtk.Image({
+                icon_name: 'list-add-symbolic',
+                pixel_size: 16,
+                margin_top: 12, margin_bottom: 12,
+                margin_start: 12, margin_end: 12,
+            }),
+        });
+        // Click activation на ListBoxRow через клик-жест.
+        const click = new Gtk.GestureClick();
+        click.connect('released', () => onActivate());
+        row.add_controller(click);
+        return row;
+    }
+
+    _pickAppNative(parent, currentDesktopId, onChosen) {
+        const root = parent.get_root ? parent.get_root() : parent;
+        const dialog = new Gtk.AppChooserDialog({
+            transient_for: root,
+            modal: true,
+        });
+        const widget = dialog.get_widget();
+        widget.set({ show_all: true, show_other: true });
+        widget.connect('application-activated', () => {
+            const info = widget.get_app_info();
+            dialog.response(Gtk.ResponseType.OK);
+        });
+        dialog.connect('response', (_d, response) => {
+            const info = widget.get_app_info();
+            dialog.destroy();
+            if (response === Gtk.ResponseType.OK && info) {
+                onChosen(info.get_id());
+            } else {
+                onChosen(null);
+            }
+        });
+        dialog.show();
     }
 
     _editRule(parent, existing, onDone) {
@@ -622,44 +757,16 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
         nameGroup.add(nameRow);
         content.append(nameGroup);
 
-        // Rules
+        // Rules — тот же AMW-стиль ListBox, что и в верхнем уровне.
         const rulesGroup = new Adw.PreferencesGroup({
             title: 'Rules',
             description: 'Routing rules for this profile.',
         });
-        let ruleRows = [];
-        const refreshRules = () => {
-            for (const r of ruleRows) rulesGroup.remove(r);
-            ruleRows = [];
-            if (working.rules.length === 0) {
-                const empty = this._emptyRow('No rules', 'Use Add to create one.');
-                ruleRows.push(empty);
-                rulesGroup.add(empty);
-                return;
-            }
-            working.rules.forEach((rule, i) => {
-                const r = this._ruleRow(rule,
-                    () => this._editRule(parent, rule, (updated) => {
-                        if (!updated) return;
-                        working.rules[i] = updated;
-                        refreshRules();
-                    }),
-                    () => {
-                        working.rules.splice(i, 1);
-                        refreshRules();
-                    });
-                ruleRows.push(r);
-                rulesGroup.add(r);
-            });
-        };
-        rulesGroup.set_header_suffix(this._addButton('Add', () => {
-            this._editRule(parent, null, (rule) => {
-                if (!rule) return;
-                working.rules.push(rule);
-                refreshRules();
-            });
-        }));
-        refreshRules();
+        const { list: rulesList } = this._buildRulesListBox(parent, {
+            getter: () => working.rules,
+            setter: (arr) => { working.rules = arr; },
+        });
+        rulesGroup.add(rulesList);
         content.append(rulesGroup);
 
         // Autostart
