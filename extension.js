@@ -16,6 +16,8 @@ import * as AnimationPatch from './lib/animation-patch.js';
 import * as VerticalSwipe from './lib/vertical-swipe.js';
 import * as AutoCleanup from './lib/auto-cleanup.js';
 import * as WorkspacesViewPatch from './lib/workspaces-view-patch.js';
+import * as WindowRules from './lib/window-rules.js';
+import * as Profiles from './lib/profiles.js';
 
 const OUR_KEY_NAMES = [
     'switch-up', 'switch-down', 'switch-left', 'switch-right',
@@ -88,6 +90,12 @@ export default class WorkspaceBranchExtension extends Extension {
 
         // Замена WorkspacesView через subclass+swap для 2D layout.
         WorkspacesViewPatch.install(this._topology);
+
+        // Window-routing engine + profiles wrapper:
+        // WindowRules держит набор правил в памяти; Profiles резолвит их из
+        // активного профиля или fallback'а и при смене профиля стартует автозапуск.
+        WindowRules.install(this._topology, this._ops);
+        Profiles.install(this._settings);
     }
 
     _installIndicator() {
@@ -135,6 +143,8 @@ export default class WorkspaceBranchExtension extends Extension {
     }
 
     disable() {
+        Profiles.uninstall();
+        WindowRules.uninstall();
         WorkspacesViewPatch.uninstall();
         AutoCleanup.uninstall();
         VerticalSwipe.uninstall();

@@ -45,6 +45,37 @@
       </description>
     </key>
 
+    <key name="window-rules" type="s">
+      <default>"[]"</default>
+      <summary>JSON array of window-routing rules (fallback when no profile is active).</summary>
+      <description>
+        Each rule is an object {"match": {...}, "target": {...}}.
+        Supported match fields (AND-combined): wm_class (exact),
+        app_id (exact, gtk_application_id or sandbox_id), title (regex),
+        pid_comm (exact, process name from /proc/&lt;pid&gt;/comm).
+        Target: {"col": N, "layer": N, "create_if_missing": bool}.
+        First rule that matches wins. Used when active-profile is empty
+        or refers to a missing profile.
+      </description>
+    </key>
+
+    <key name="profiles" type="s">
+      <default>"[]"</default>
+      <summary>JSON array of named profiles bundling rules + autostart.</summary>
+      <description>
+        Each profile: {"name": "Work", "rules": [...same as window-rules...],
+        "autostart": [{"cmd": ["firefox"]}, {"cmd": ["code", "--new-window"]}]}.
+        Autostart commands are spawned via Gio.Subprocess (argv array, no shell)
+        when the active profile changes — or once per session if the extension
+        loads and the active profile differs from the cached session profile.
+      </description>
+    </key>
+
+    <key name="active-profile" type="s">
+      <default>""</default>
+      <summary>Name of the currently active profile (empty = none).</summary>
+    </key>
+
     <key name="drum-rotation" type="b">
       <default>false</default>
       <summary>Drum mode for vertical navigation.</summary>
