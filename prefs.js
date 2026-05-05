@@ -41,6 +41,14 @@ export default class WorkspaceGridPreferences extends ExtensionPreferences {
         settings.bind('forget-empty-on-disable', forget, 'active',
             Gio.SettingsBindFlags.DEFAULT);
         beh.add(forget);
+
+        const drum = new Adw.SwitchRow({
+            title: 'Drum mode (Super+Up/Down rotates the column)',
+            subtitle: 'Active workspace stays on the main row. Vertical swipes rotate the active column so a different appendage becomes the new main; Mutter is physically reindexed.',
+        });
+        settings.bind('drum-rotation', drum, 'active',
+            Gio.SettingsBindFlags.DEFAULT);
+        beh.add(drum);
         page.add(beh);
 
         const ind = new Adw.PreferencesGroup({ title: 'Indicator' });

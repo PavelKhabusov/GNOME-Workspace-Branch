@@ -42,7 +42,7 @@ export default class WorkspaceBranchExtension extends Extension {
         this._topology.load();
 
         this._ops = new WorkspaceOps(this._topology);
-        this._navigator = new Navigator(this._topology, this._ops);
+        this._navigator = new Navigator(this._topology, this._ops, this._settings);
 
         // Снимаем пересекающиеся системные accel-ы ДО регистрации наших,
         // иначе Mutter откажет в регистрации — Super+Down уйдёт в unmaximize.

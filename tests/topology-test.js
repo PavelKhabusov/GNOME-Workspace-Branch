@@ -271,6 +271,140 @@ test('external workspace-removed of appendage drops it', () => {
     globalThis.global.workspace_manager = null;
 });
 
+print('\nTopology.columnHasAppendages / removeMainColumn');
+test('columnHasAppendages reports presence', () => {
+    const s = new FakeSettings({
+        'appendages': '[{"col":1,"dir":"up"},{"col":3,"dir":"down"}]',
+        'main-row-size': 4,
+    });
+    withWM(6, () => {
+        const t = new Topology(s); t.load();
+        eq(t.columnHasAppendages(0), false);
+        eq(t.columnHasAppendages(1), true);
+        eq(t.columnHasAppendages(2), false);
+        eq(t.columnHasAppendages(3), true);
+    });
+});
+
+test('removeMainColumn shrinks row and reindexes later columns', () => {
+    const s = new FakeSettings({
+        'appendages': '[{"col":3,"dir":"up"},{"col":4,"dir":"down"},{"col":1,"dir":"up"}]',
+        'main-row-size': 5,
+    });
+    withWM(8, () => {
+        const t = new Topology(s); t.load();
+        // Удаляем пустую колонку 2 — col=3 → 2, col=4 → 3, col=1 не двигается.
+        eq(t.removeMainColumn(2), true);
+        eq(t.mainRowSize, 4);
+        eq(t.snapshot().appendages, [
+            {col:2,dir:'up'}, {col:3,dir:'down'}, {col:1,dir:'up'},
+        ]);
+    });
+});
+
+test('removeMainColumn refuses when column has appendages', () => {
+    const s = new FakeSettings({
+        'appendages': '[{"col":2,"dir":"up"}]',
+        'main-row-size': 4,
+    });
+    withWM(5, () => {
+        const t = new Topology(s); t.load();
+        eq(t.removeMainColumn(2), false);
+        eq(t.mainRowSize, 4);
+        eq(t.appendageCount, 1);
+    });
+});
+
+test('removeMainColumn rejects out-of-range', () => {
+    const s = new FakeSettings({ 'main-row-size': 3 });
+    withWM(3, () => {
+        const t = new Topology(s); t.load();
+        eq(t.removeMainColumn(-1), false);
+        eq(t.removeMainColumn(3),  false);
+        eq(t.mainRowSize, 3);
+    });
+});
+
+print('\nTopology.computeRotation');
+test('rotate down promotes layer +1 to main, demotes layers above', () => {
+    const s = new FakeSettings({
+        'appendages': '[{"col":1,"dir":"up"},{"col":1,"dir":"down"}]',
+        'main-row-size': 3,
+    });
+    withWM(5, () => {
+        const t = new Topology(s); t.load();
+        // Initially: 0=col0, 1=col1main, 2=col2main, 3=col1up=-1, 4=col1down=+1
+        const r = t.computeRotation(1, 'down');
+        // Expected new state: col1 layers shift -1.
+        // col1 main (idx 1) was layer 0, becomes -1 (first up appendage)
+        // col1 up (idx 3) was -1, becomes -2 (second up appendage)
+        // col1 down (idx 4) was +1, becomes 0 (new main)
+        eq(r.newAppendages, [{col:1,dir:'up'}, {col:1,dir:'up'}]);
+        eq(r.newLinearOf, [0, 3, 2, 4, 1]);
+    });
+});
+
+test('rotate up promotes layer -1 to main, demotes layers below', () => {
+    const s = new FakeSettings({
+        'appendages': '[{"col":1,"dir":"up"},{"col":1,"dir":"down"}]',
+        'main-row-size': 3,
+    });
+    withWM(5, () => {
+        const t = new Topology(s); t.load();
+        const r = t.computeRotation(1, 'up');
+        // col1 layers shift +1: main → +1, up=-1 → 0 (new main), down=+1 → +2
+        eq(r.newAppendages, [{col:1,dir:'down'}, {col:1,dir:'down'}]);
+        eq(r.newLinearOf, [0, 3, 2, 1, 4]);
+    });
+});
+
+test('rotate down rejects column with no down layer', () => {
+    const s = new FakeSettings({
+        'appendages': '[{"col":1,"dir":"up"}]',
+        'main-row-size': 3,
+    });
+    withWM(4, () => {
+        const t = new Topology(s); t.load();
+        isNull(t.computeRotation(1, 'down'));
+        // up rotation works since there is a -1 layer.
+        const r = t.computeRotation(1, 'up');
+        if (!r) throw new Error('expected non-null for up rotation');
+    });
+});
+
+test('rotation does not touch other columns', () => {
+    const s = new FakeSettings({
+        'appendages': '[{"col":1,"dir":"up"},{"col":2,"dir":"down"},{"col":1,"dir":"down"}]',
+        'main-row-size': 3,
+    });
+    withWM(6, () => {
+        const t = new Topology(s); t.load();
+        // Initial linear:
+        //   0=col0 main, 1=col1 main, 2=col2 main,
+        //   3={col:1,up}=col1 layer-1,
+        //   4={col:2,down}=col2 layer+1,
+        //   5={col:1,down}=col1 layer+1
+        const r = t.computeRotation(1, 'down');
+        // col1 shifts -1: main→-1, -1→-2, +1→main.
+        // col2 unchanged: main idx 2, layer+1 still appendage.
+        // newLinearOf:
+        //   idx 0 (col0) → 0
+        //   idx 1 (col1 main, now -1) → first col1-up appendage
+        //   idx 2 (col2) → 2
+        //   idx 3 (col1 -1, now -2) → second col1-up appendage
+        //   idx 4 (col2 +1) → first col2-down appendage
+        //   idx 5 (col1 +1, now main) → 1
+        // newAppendages order (cols asc): col1 ups, col1 downs, col2 ups, col2 downs.
+        //   col1: 2 ups (depth1, depth2), 0 downs.
+        //   col2: 0 ups, 1 down.
+        // = [{col:1,up}, {col:1,up}, {col:2,down}]
+        // Linear positions for appendages:
+        //   M=3, so idx 3=col1up depth1, 4=col1up depth2, 5=col2down depth1.
+        eq(r.newAppendages, [{col:1,dir:'up'}, {col:1,dir:'up'}, {col:2,dir:'down'}]);
+        eq(r.newLinearOf, [0, 3, 2, 4, 5, 1]);
+    });
+});
+
 print('\nTopology — corrupt storage fallback');
 test('invalid JSON falls back to all-main', () => {
     const s = new FakeSettings({

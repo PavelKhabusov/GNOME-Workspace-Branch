@@ -45,6 +45,20 @@
       </description>
     </key>
 
+    <key name="drum-rotation" type="b">
+      <default>false</default>
+      <summary>Drum mode for vertical navigation.</summary>
+      <description>
+        When enabled, Super+Up/Down does not navigate to an appendage workspace.
+        Instead, the active column rotates like a drum: the workspace at layer
+        +1 (or -1) becomes the new main, and the previous main slides into
+        layer -1 (or +1). The active workspace index always stays on the main
+        row — only the workspace shown there changes. Mutter is reordered to
+        keep linear indices consistent, so other extensions and AMW rules see
+        the freshly-rotated arrangement.
+      </description>
+    </key>
+
     <key name="switch-up" type="as">
       <default><![CDATA[['<Super>Up']]]></default>
       <summary>Switch to workspace above current column.</summary>
