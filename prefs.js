@@ -1,6 +1,8 @@
 import Adw from 'gi://Adw';
+import Gdk from 'gi://Gdk';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import GObject from 'gi://GObject';
 import Gtk from 'gi://Gtk';
 
 import { ExtensionPreferences } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
@@ -29,6 +31,7 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
         page.add(this._buildBehavior(settings));
         page.add(this._buildIndicator(settings));
         page.add(this._buildRulesGroup(window, settings));
+        page.add(this._buildLayoutPreview(settings));
         page.add(this._buildProfilesGroup(window, settings));
 
         window.add(page);
@@ -341,86 +344,27 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
             description: 'Auto-route windows by application. First match wins. Used as a fallback when no profile is active.',
         });
 
-        // Без auto-refresh от changed::window-rules: spinner-правки не должны
-        // пересобирать строки и дёргать фокус. Add/edit/delete вызывают refresh
-        // явно из коллбэков.
+        // Listbox держит cachedArr внутри. Чтобы внешние изменения (например,
+        // DnD из «Layout preview») долетели сюда, ловим changed::window-rules
+        // с self-write детектором: если значение совпадает с последним нашим —
+        // никаких действий, иначе full refresh listbox'а.
+        let lastWritten = settings.get_string('window-rules');
         const { list, refresh } = this._buildRulesListBox(window, {
             getter: () => this._readArr(settings, 'window-rules'),
-            setter: (arr) => this._writeArr(settings, 'window-rules', arr),
+            setter: (arr) => {
+                const json = JSON.stringify(arr);
+                lastWritten = json;
+                settings.set_string('window-rules', json);
+            },
         });
-
-        const importBtn = new Gtk.Button({
-            child: new Adw.ButtonContent({
-                icon_name: 'document-open-symbolic',
-                label: 'Import from AMW',
-            }),
-            tooltip_text: 'Import the application list from the Auto Move Windows extension.',
-            css_classes: ['flat'],
-            valign: Gtk.Align.CENTER,
+        settings.connect('changed::window-rules', () => {
+            const cur = settings.get_string('window-rules');
+            if (cur === lastWritten) return;
+            lastWritten = cur;
+            refresh();
         });
-        importBtn.connect('clicked', () => this._importFromAMW(window, settings, refresh));
-        group.set_header_suffix(importBtn);
-
         group.add(list);
         return group;
-    }
-
-    _importFromAMW(window, settings, refresh) {
-        // Читаем application-list напрямую через extension's compiled schema.
-        const schemaDir = '/home/' + GLib.get_user_name() +
-            '/.local/share/gnome-shell/extensions/' +
-            'auto-move-windows@gnome-shell-extensions.gcampax.github.com/schemas';
-        let amwList = [];
-        try {
-            const file = Gio.File.new_for_path(`${schemaDir}/gschemas.compiled`);
-            if (!file.query_exists(null))
-                throw new Error('AMW schema not found');
-            const source = Gio.SettingsSchemaSource.new_from_directory(
-                schemaDir, Gio.SettingsSchemaSource.get_default(), false);
-            const schema = source.lookup(
-                'org.gnome.shell.extensions.auto-move-windows', false);
-            if (!schema) throw new Error('AMW schema lookup failed');
-            const amw = new Gio.Settings({ settings_schema: schema });
-            amwList = amw.get_strv('application-list') || [];
-        } catch (e) {
-            this._toast(window, `AMW config not available: ${e.message}`);
-            return;
-        }
-
-        const ours = this._readArr(settings, 'window-rules');
-        const seen = new Set(ours.map(r => r?.match?.desktop_id).filter(Boolean));
-        let added = 0;
-        for (const entry of amwList) {
-            const colon = entry.lastIndexOf(':');
-            if (colon < 0) continue;
-            const id = entry.slice(0, colon);
-            const ws = parseInt(entry.slice(colon + 1), 10);
-            if (!id || isNaN(ws) || ws < 1) continue;
-            if (seen.has(id)) continue;
-            ours.push({
-                match: { desktop_id: id },
-                target: { col: ws - 1, layer: 0, create_if_missing: false },
-            });
-            seen.add(id);
-            added++;
-        }
-        if (added > 0) {
-            this._writeArr(settings, 'window-rules', ours);
-            refresh();
-            this._toast(window, `Imported ${added} rule(s) from Auto Move Windows.`);
-        } else {
-            this._toast(window, 'Nothing to import (already migrated, or AMW empty).');
-        }
-    }
-
-    _toast(window, msg) {
-        try {
-            if (window && window.add_toast) {
-                window.add_toast(new Adw.Toast({ title: msg, timeout: 4 }));
-                return;
-            }
-        } catch {}
-        log(`[workspace-branch prefs] ${msg}`);
     }
 
     _buildAddRow(window, onActivate) {
@@ -740,6 +684,194 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
         });
 
         dialog.present(parent);
+    }
+
+    // ─── layout preview (2D grid + DnD) ────────────────────────────────
+
+    _buildLayoutPreview(settings) {
+        const group = new Adw.PreferencesGroup({
+            title: 'Layout preview',
+            description: 'Where each rule places its windows. Drag an icon to retarget the rule to a different (col, layer).',
+        });
+
+        const wrap = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL,
+            margin_top: 4, margin_bottom: 4,
+        });
+
+        let lastWritten = settings.get_string('window-rules');
+        let rebuild;
+        rebuild = () => {
+            // Clear children.
+            let child = wrap.get_first_child();
+            while (child) {
+                const next = child.get_next_sibling();
+                wrap.remove(child);
+                child = next;
+            }
+
+            const mainRowSize = Math.max(1, settings.get_int('main-row-size') || 1);
+            let appendages = [];
+            try { appendages = JSON.parse(settings.get_string('appendages')) || []; } catch {}
+            if (!Array.isArray(appendages)) appendages = [];
+            const rules = this._readArr(settings, 'window-rules');
+
+            // Диапазон слоёв = max глубина из appendages + max от target'ов.
+            let minLayer = 0, maxLayer = 0;
+            for (const a of appendages) {
+                if (a?.dir === 'up')   minLayer = Math.min(minLayer, -1);
+                if (a?.dir === 'down') maxLayer = Math.max(maxLayer, 1);
+            }
+            for (const r of rules) {
+                const l = r?.target?.layer ?? 0;
+                if (l < minLayer) minLayer = Math.max(l, -3); // clamp
+                if (l > maxLayer) maxLayer = Math.min(l, 3);
+            }
+            // Гарантируем хоть одну строку (main).
+            if (minLayer === 0 && maxLayer === 0) {
+                // OK, just main row.
+            }
+
+            const grid = new Gtk.Grid({
+                column_spacing: 6,
+                row_spacing: 6,
+                margin_top: 4, margin_bottom: 4,
+            });
+
+            // Header: col labels.
+            for (let c = 0; c < mainRowSize; c++) {
+                const l = new Gtk.Label({
+                    label: `col ${c}`,
+                    css_classes: ['caption', 'dim-label'],
+                    xalign: 0.5,
+                });
+                grid.attach(l, c + 1, 0, 1, 1);
+            }
+
+            let rowIdx = 1;
+            for (let layer = minLayer; layer <= maxLayer; layer++) {
+                const layerLbl = new Gtk.Label({
+                    label: layer === 0 ? 'main'
+                          : layer < 0 ? `↑${-layer}`
+                          :              `↓${layer}`,
+                    css_classes: ['caption', 'dim-label'],
+                    xalign: 1,
+                    margin_end: 4,
+                });
+                grid.attach(layerLbl, 0, rowIdx, 1, 1);
+
+                for (let c = 0; c < mainRowSize; c++) {
+                    grid.attach(this._previewCell(settings, c, layer, rules), c + 1, rowIdx, 1, 1);
+                }
+                rowIdx++;
+            }
+
+            wrap.append(grid);
+        };
+
+        rebuild();
+
+        // Перерендер на любые изменения, но только когда это НЕ наша же
+        // self-запись — иначе DnD-drop вызвал бы rebuild прямо в обработчике.
+        const onChanged = () => {
+            const cur = settings.get_string('window-rules');
+            if (cur === lastWritten) return;
+            lastWritten = cur;
+            rebuild();
+        };
+        settings.connect('changed::window-rules', onChanged);
+        settings.connect('changed::main-row-size', () => { lastWritten = ''; rebuild(); });
+        settings.connect('changed::appendages',    () => { lastWritten = ''; rebuild(); });
+
+        // Экспортируем self-write маркер для drop-handler'а.
+        wrap._markWritten = () => {
+            lastWritten = settings.get_string('window-rules');
+            rebuild();
+        };
+
+        group.add(wrap);
+        return group;
+    }
+
+    _previewCell(settings, col, layer, rules) {
+        const matching = rules.filter(r =>
+            (r?.target?.col ?? 0) === col && (r?.target?.layer ?? 0) === layer
+        );
+
+        const frame = new Gtk.Frame({
+            css_classes: ['card'],
+            width_request: 96,
+            height_request: 56,
+        });
+
+        const flow = new Gtk.FlowBox({
+            margin_top: 4, margin_bottom: 4,
+            margin_start: 4, margin_end: 4,
+            min_children_per_line: 1,
+            max_children_per_line: 4,
+            row_spacing: 2, column_spacing: 2,
+            selection_mode: Gtk.SelectionMode.NONE,
+            valign: Gtk.Align.CENTER,
+            halign: Gtk.Align.CENTER,
+            homogeneous: false,
+        });
+
+        for (const rule of matching) {
+            const did = rule?.match?.desktop_id;
+            if (!did) continue;
+            const info = Gio.DesktopAppInfo.new(did);
+            const icon = info ? info.get_icon() : Gio.ThemedIcon.new('application-x-executable');
+            const name = info ? info.get_display_name() : did;
+
+            const img = new Gtk.Image({
+                css_classes: ['icon-dropshadow'],
+                gicon: icon,
+                pixel_size: 28,
+                tooltip_text: name,
+            });
+            // Drag source.
+            const drag = new Gtk.DragSource();
+            drag.set_actions(Gdk.DragAction.MOVE);
+            drag.connect('prepare', () => {
+                const value = new GObject.Value();
+                value.init(GObject.TYPE_STRING);
+                value.set_string(did);
+                return Gdk.ContentProvider.new_for_value(value);
+            });
+            // Полупрозрачный во время перетаскивания — feedback.
+            drag.connect('drag-begin', () => img.opacity = 0.4);
+            drag.connect('drag-end', () => img.opacity = 1.0);
+            img.add_controller(drag);
+            flow.append(img);
+        }
+
+        frame.set_child(flow);
+
+        // Drop target.
+        const drop = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE);
+        drop.connect('drop', (_t, value /* string */) => {
+            const did = value;
+            if (!did) return false;
+            const arr = this._readArr(settings, 'window-rules');
+            const rule = arr.find(r => r?.match?.desktop_id === did);
+            if (!rule) return false;
+            rule.target ??= {};
+            if (rule.target.col === col && rule.target.layer === layer) return false;
+            rule.target.col = col;
+            rule.target.layer = layer;
+            this._writeArr(settings, 'window-rules', arr);
+            // Перерендер. Делаем после microtask, чтобы дождаться завершения drop.
+            const wrap = frame.get_parent()?.get_parent()?.get_parent();
+            const mark = wrap && wrap._markWritten;
+            if (mark) GLib.idle_add(GLib.PRIORITY_DEFAULT, () => { mark(); return GLib.SOURCE_REMOVE; });
+            return true;
+        });
+        // Подсветка над целью.
+        drop.connect('enter', () => { frame.add_css_class('accent'); return Gdk.DragAction.MOVE; });
+        drop.connect('leave', () => frame.remove_css_class('accent'));
+        frame.add_controller(drop);
+
+        return frame;
     }
 
     // ─── profiles ──────────────────────────────────────────────────────
