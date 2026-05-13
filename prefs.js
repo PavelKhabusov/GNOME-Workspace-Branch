@@ -502,7 +502,7 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
         titleRe.text = existing?.match?.title ?? '';
         matchGroup.add(titleRe);
 
-        const procName = new Adw.EntryRow({ title: 'Process name' });
+        const procName = new Adw.EntryRow({ title: 'Process name (regex, /proc/<pid>/comm)' });
         procName.text = existing?.match?.pid_comm ?? '';
         matchGroup.add(procName);
 
