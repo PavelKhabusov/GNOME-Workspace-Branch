@@ -72,7 +72,7 @@ export default class WorkspaceBranchExtension extends Extension {
             () => this._reinstallIndicator());
 
         // Замена _thumbnailsBox в overview на наш GridThumbnailsBox для 2D-раскладки и DnD.
-        OverviewPatch.install(this._topology, this._ops);
+        OverviewPatch.install(this._topology, this._ops, this._settings);
 
         // Patch animateSwitch — пропускаем горизонтальный slide для
         // вертикальных/диагональных переходов (main↔отросток в топологии).
