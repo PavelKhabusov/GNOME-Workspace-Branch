@@ -65,13 +65,6 @@ export default class WorkspaceBranchExtension extends Extension {
         this._removedSignal = wm.connect('workspace-removed',
             (_wm, idx) => this._topology.onWorkspaceRemoved(idx));
 
-        // Drum-инвариант: «активный всегда в main row». Любая активация
-        // воркспейса извне (клик по приложению в dock, клик по window-preview
-        // в overview, app.activate из autostart) обходит наш switchUp/Down —
-        // ловим её здесь и доворачиваем колонку.
-        this._activeChangedSignal = wm.connect('active-workspace-changed',
-            () => this._enforceDrumInvariant());
-
         // Индикатор подписывается на те же сигналы — порядок connect гарантирует,
         // что topology обновится первой, а индикатор отрисует уже актуальное состояние.
         this._installIndicator();
@@ -127,25 +120,6 @@ export default class WorkspaceBranchExtension extends Extension {
         this._installIndicator();
     }
 
-    _enforceDrumInvariant() {
-        if (this._rotating) return;
-        if (!this._settings?.get_boolean('drum-rotation')) return;
-        const wm = global.workspace_manager;
-        const idx = wm.get_active_workspace_index();
-        const pos = this._topology?.positionOf(idx);
-        if (!pos || pos.layer === 0) return;
-        this._rotating = true;
-        try {
-            const direction = pos.layer > 0 ? 'down' : 'up';
-            const steps = Math.abs(pos.layer);
-            for (let i = 0; i < steps; i++) {
-                if (!this._ops.rotateColumn(pos.col, direction)) break;
-            }
-        } finally {
-            this._rotating = false;
-        }
-    }
-
     _restoreAppendages() {
         const wm = global.workspace_manager;
         const have = wm.n_workspaces;
@@ -194,10 +168,6 @@ export default class WorkspaceBranchExtension extends Extension {
         if (this._removedSignal) {
             wm.disconnect(this._removedSignal);
             this._removedSignal = null;
-        }
-        if (this._activeChangedSignal) {
-            wm.disconnect(this._activeChangedSignal);
-            this._activeChangedSignal = null;
         }
 
         if (this._settings?.get_boolean('forget-empty-on-disable'))
