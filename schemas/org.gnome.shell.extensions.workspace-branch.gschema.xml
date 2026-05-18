@@ -90,6 +90,20 @@
       </description>
     </key>
 
+    <key name="gesture-override" type="b">
+      <default>false</default>
+      <summary>Remap 3-finger touchpad gestures.</summary>
+      <description>
+        When enabled, 3-finger vertical swipe is captured for our vertical
+        column navigation (with a smooth slide), and the overview / app-grid
+        ladder is moved to 4-finger up/down. When disabled (default), the
+        native GNOME 3-finger behaviour is left intact: 3-finger vertical
+        opens the overview / app grid and 3-finger horizontal switches
+        workspaces. Super+scroll and scroll-over-panel keep working either
+        way.
+      </description>
+    </key>
+
     <key name="switch-up" type="as">
       <default><![CDATA[['<Super>Up']]]></default>
       <summary>Switch to workspace above current column.</summary>

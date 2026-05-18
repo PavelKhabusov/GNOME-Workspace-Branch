@@ -104,6 +104,13 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
         settings.bind('drum-rotation', drum, 'active', Gio.SettingsBindFlags.DEFAULT);
         beh.add(drum);
 
+        const gesture = new Adw.SwitchRow({
+            title: 'Override 3-finger touchpad gestures',
+            subtitle: 'On — 3-finger vertical swipe drives our column navigation and the overview / app-grid ladder moves to 4-finger up/down. Off (default) — native GNOME behaviour: 3-finger vertical opens overview, 3-finger horizontal switches workspaces. Super+scroll and scroll-over-panel work either way. Takes effect after re-login.',
+        });
+        settings.bind('gesture-override', gesture, 'active', Gio.SettingsBindFlags.DEFAULT);
+        beh.add(gesture);
+
         return beh;
     }
 

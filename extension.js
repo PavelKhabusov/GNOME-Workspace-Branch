@@ -87,12 +87,19 @@ export default class WorkspaceBranchExtension extends Extension {
         // вертикальных/диагональных переходов (main↔отросток в топологии).
         AnimationPatch.install(this._topology);
 
-        // 4-пальцевый свайп → лестница overview / Super+scroll → switchUp/Down.
-        this._swipes = new Swipes(this._navigator);
+        // gesture-override: захват 3-finger под вертикаль + overview на 4-finger.
+        // Выкл по умолчанию — нативное 3-finger поведение остаётся.
+        const gestureOverride = this._settings.get_boolean('gesture-override');
+
+        // Super+scroll → switchUp/Down и scroll-over-panel работают всегда;
+        // 4-finger лестница и захват 3-finger — только при gesture-override.
+        this._swipes = new Swipes(this._navigator, gestureOverride);
         this._swipes.enable();
 
-        // Native-style 3-finger vertical swipe with progress.
-        VerticalSwipe.install(this._topology);
+        // Native-style 3-finger vertical swipe with progress — только когда
+        // мы реально забрали 3-finger у нативного overview.
+        if (gestureOverride)
+            VerticalSwipe.install(this._topology);
 
         // Авто-удаление пустых отростков при switch / window close.
         AutoCleanup.install(this._topology, this._ops);
