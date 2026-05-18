@@ -1,0 +1,82 @@
+{
+  "commands": [
+    {
+      "name": "Install",
+      "command": "make install",
+      "type": "terminal",
+      "group": "Build"
+    },
+    {
+      "name": "Install + reload (settings only)",
+      "command": "make install && gnome-extensions disable workspace-branch@pavel.local && gnome-extensions enable workspace-branch@pavel.local",
+      "type": "terminal",
+      "group": "Build"
+    },
+    {
+      "name": "Compile schemas",
+      "command": "make compile-schemas",
+      "type": "terminal",
+      "group": "Build"
+    },
+    {
+      "name": "Pack release zip",
+      "command": "make pack",
+      "type": "terminal",
+      "group": "Build"
+    },
+    {
+      "name": "Enable",
+      "command": "gnome-extensions enable workspace-branch@pavel.local",
+      "type": "terminal",
+      "group": "Lifecycle"
+    },
+    {
+      "name": "Disable",
+      "command": "gnome-extensions disable workspace-branch@pavel.local",
+      "type": "terminal",
+      "group": "Lifecycle"
+    },
+    {
+      "name": "Open preferences",
+      "command": "gnome-extensions prefs workspace-branch@pavel.local",
+      "type": "terminal",
+      "group": "Lifecycle"
+    },
+    {
+      "name": "Uninstall",
+      "command": "make uninstall",
+      "type": "terminal",
+      "group": "Lifecycle"
+    },
+    {
+      "name": "Tail logs (follow)",
+      "command": "journalctl --user -b 0 _COMM=gnome-shell -f | grep -i --line-buffered workspace-branch",
+      "type": "terminal",
+      "group": "Debug"
+    },
+    {
+      "name": "Last 200 log lines",
+      "command": "journalctl --user -b 0 _COMM=gnome-shell -n 200 | grep -i workspace-branch",
+      "type": "terminal",
+      "group": "Debug"
+    },
+    {
+      "name": "Clear autostart session marker",
+      "command": "rm -f \"$XDG_RUNTIME_DIR/gnome-workspace-branch/launched-this-session\" && echo cleared",
+      "type": "terminal",
+      "group": "Debug"
+    },
+    {
+      "name": "Nested shell (Wayland test)",
+      "command": "make nested",
+      "type": "terminal",
+      "group": "Debug"
+    },
+    {
+      "name": "Run tests",
+      "command": "make test",
+      "type": "terminal",
+      "group": "Test"
+    }
+  ]
+}
