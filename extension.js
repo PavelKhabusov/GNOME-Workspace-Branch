@@ -19,6 +19,7 @@ import * as AutoCleanup from './lib/auto-cleanup.js';
 import * as WorkspacesViewPatch from './lib/workspaces-view-patch.js';
 import * as WindowRules from './lib/window-rules.js';
 import * as Autostart from './lib/autostart.js';
+import { FocusService } from './lib/focus-service.js';
 
 const OUR_KEY_NAMES = [
     'switch-up', 'switch-down', 'switch-left', 'switch-right',
@@ -111,6 +112,14 @@ export default class WorkspaceBranchExtension extends Extension {
         // Autostart раз за сессию запускает .desktop у правил с autostart=true.
         WindowRules.install(this._topology, this._ops, this._settings);
         Autostart.install(this._settings);
+
+        // D-Bus сервис для внешней фокусировки окон — home-kit-dash и
+        // прочие скрипты дёргают gdbus, чтобы реально активировать окно
+        // (Wayland focus-stealing prevention иначе превращает `code <path>`
+        // в badge без фокуса).
+        console.log('[workspace-branch] starting FocusService…');
+        this._focusService = new FocusService();
+        this._focusService.enable();
     }
 
     _installIndicator() {
@@ -186,6 +195,9 @@ export default class WorkspaceBranchExtension extends Extension {
     }
 
     disable() {
+        this._focusService?.disable();
+        this._focusService = null;
+
         Autostart.uninstall();
         WindowRules.uninstall();
         WorkspacesViewPatch.uninstall();
