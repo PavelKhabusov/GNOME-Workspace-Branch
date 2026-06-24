@@ -18,6 +18,7 @@ import * as VerticalSwipe from './lib/vertical-swipe.js';
 import * as AutoCleanup from './lib/auto-cleanup.js';
 import * as WorkspacesViewPatch from './lib/workspaces-view-patch.js';
 import * as WindowRules from './lib/window-rules.js';
+import * as PipPin from './lib/pip-pin.js';
 import * as Autostart from './lib/autostart.js';
 import { FocusService } from './lib/focus-service.js';
 
@@ -107,6 +108,13 @@ export default class WorkspaceBranchExtension extends Extension {
 
         // Замена WorkspacesView через subclass+swap для 2D layout.
         WorkspacesViewPatch.install(this._topology);
+
+        // Picture-in-Picture видео закрепляем на всех воркспейсах — иначе на
+        // статических воркспейсах оно теряется при переключении колонки.
+        // Ставим ДО WindowRules: pip-pin подключается к window-created первым,
+        // его idle-колбэк успевает выставить on-all-workspaces раньше, и
+        // WindowRules видит флаг и не роутит PiP в колонку приложения.
+        PipPin.install(this._settings);
 
         // Window-routing engine читает правила прямо из window-rules.
         // Autostart раз за сессию запускает .desktop у правил с autostart=true.
@@ -198,6 +206,7 @@ export default class WorkspaceBranchExtension extends Extension {
         this._focusService?.disable();
         this._focusService = null;
 
+        PipPin.uninstall();
         Autostart.uninstall();
         WindowRules.uninstall();
         WorkspacesViewPatch.uninstall();

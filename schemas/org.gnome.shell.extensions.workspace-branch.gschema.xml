@@ -90,6 +90,19 @@
       </description>
     </key>
 
+    <key name="pin-pip-windows" type="b">
+      <default>true</default>
+      <summary>Keep Picture-in-Picture windows on all workspaces, always on top.</summary>
+      <description>
+        When enabled (default), any window whose title looks like a
+        Picture-in-Picture video (Firefox, Chrome/Chromium, …) is pinned to
+        every workspace via the shell's "Always on Visible Workspace" and kept
+        above other windows — so the floating video stays visible when you
+        switch columns. Disabling stops pinning new PiP windows; already-pinned
+        ones unstick when closed.
+      </description>
+    </key>
+
     <key name="gesture-override" type="b">
       <default>false</default>
       <summary>Remap 3-finger touchpad gestures.</summary>

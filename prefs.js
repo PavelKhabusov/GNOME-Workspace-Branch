@@ -111,6 +111,13 @@ export default class WorkspaceBranchPreferences extends ExtensionPreferences {
         settings.bind('gesture-override', gesture, 'active', Gio.SettingsBindFlags.DEFAULT);
         beh.add(gesture);
 
+        const pip = new Adw.SwitchRow({
+            title: 'Keep Picture-in-Picture on all workspaces',
+            subtitle: 'Pin any Picture-in-Picture video window (Firefox, Chrome, …) to every workspace and keep it above other windows, so the floating video stays visible when you switch columns.',
+        });
+        settings.bind('pin-pip-windows', pip, 'active', Gio.SettingsBindFlags.DEFAULT);
+        beh.add(pip);
+
         return beh;
     }
 
