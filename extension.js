@@ -19,12 +19,13 @@ import * as AutoCleanup from './lib/auto-cleanup.js';
 import * as WorkspacesViewPatch from './lib/workspaces-view-patch.js';
 import * as WindowRules from './lib/window-rules.js';
 import * as PipPin from './lib/pip-pin.js';
+import * as PreviewIcons from './lib/preview-icons.js';
 import * as Autostart from './lib/autostart.js';
 import { FocusService } from './lib/focus-service.js';
 
 const OUR_KEY_NAMES = [
     'switch-up', 'switch-down', 'switch-left', 'switch-right',
-    'create-up', 'create-down', 'extend-row-right',
+    'create-up', 'create-down', 'extend-row-right', 'extend-row-left',
     'move-window-up', 'move-window-down', 'move-window-left', 'move-window-right',
     'remove-current',
 ];
@@ -119,6 +120,12 @@ export default class WorkspaceBranchExtension extends Extension {
         // Window-routing engine читает правила прямо из window-rules.
         // Autostart раз за сессию запускает .desktop у правил с autostart=true.
         WindowRules.install(this._topology, this._ops, this._settings);
+
+        // Иконки в превью/alt-tab для окон без .desktop (Unity): берём их из
+        // поля `icon` того же правила, что роутит окно. Ставим ПОСЛЕ
+        // WindowRules — фолбэк спрашивает у него правило для окна.
+        PreviewIcons.install();
+
         Autostart.install(this._settings);
 
         // D-Bus сервис для внешней фокусировки окон — home-kit-dash и
@@ -208,6 +215,7 @@ export default class WorkspaceBranchExtension extends Extension {
 
         PipPin.uninstall();
         Autostart.uninstall();
+        PreviewIcons.uninstall();   // до WindowRules — фолбэк зависит от него
         WindowRules.uninstall();
         WorkspacesViewPatch.uninstall();
         AutoCleanup.uninstall();

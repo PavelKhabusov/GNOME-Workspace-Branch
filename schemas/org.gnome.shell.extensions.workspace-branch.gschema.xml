@@ -54,8 +54,16 @@
         app_id (exact, gtk_application_id or sandbox_id), title (regex),
         pid_comm (exact, process name from /proc/&lt;pid&gt;/comm).
         Target: {"col": N, "layer": N, "create_if_missing": bool}.
+        Optional "icon": icon for windows GNOME cannot map to a .desktop
+        (e.g. Unity Editor, matched by pid_comm) — otherwise such windows get
+        no icon in overview previews and alt-tab. Accepts a ".desktop" id
+        (borrow that app's icon), an absolute path, or a themed icon name.
+        Optional "name": display name for those same windows (defaults to
+        wm_class).
         First rule that matches wins. Used when active-profile is empty
         or refers to a missing profile.
+        Rules are owned by the user: the extension never rewrites this key
+        (the main row grows to fit the columns rules ask for, not vice versa).
       </description>
     </key>
 
@@ -160,6 +168,16 @@
     <key name="extend-row-right" type="as">
       <default><![CDATA[['<Super><Control>Right']]]></default>
       <summary>Extend main row with a new column on the right.</summary>
+    </key>
+
+    <key name="extend-row-left" type="as">
+      <default><![CDATA[['<Super><Control>Left']]]></default>
+      <summary>Insert a new column to the left of the current one.</summary>
+      <description>
+        Inserts an empty main-row column at the current position; the current
+        column and everything to its right shift right by one. Window-routing
+        rules that target the shifted columns are reindexed automatically.
+      </description>
     </key>
 
     <key name="move-window-up" type="as">

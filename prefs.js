@@ -15,6 +15,7 @@ const KEYBIND_ROWS = [
     ['create-up',         'Create above'],
     ['create-down',       'Create below'],
     ['extend-row-right',  'Extend main row (new column on the right)'],
+    ['extend-row-left',   'Insert column to the left of current'],
     ['move-window-up',    'Move window up'],
     ['move-window-down',  'Move window down'],
     ['move-window-left',  'Move window left'],

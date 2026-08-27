@@ -99,6 +99,104 @@ test('grows mainRowSize to absorb extras', () => {
     });
 });
 
+print('\nTopology.load — main row floor from window-rules');
+// Регрессия: главный ряд не может быть уже, чем колонки, которые просят
+// правила. Раньше auto-cleanup при логауте схлопывал main-row-size (и заодно
+// сдвигал сами правила), и следующая сессия поднималась «на колонку левее».
+// Теперь правила — источник истины, а mainRowSize под них растягивается.
+const RULES_TO_COL_3 = JSON.stringify([
+    { match: { desktop_id: 'telegram.desktop' }, target: { col: 0, layer: 0 } },
+    { match: { desktop_id: 'helium.desktop' },   target: { col: 1, layer: 0 } },
+    { match: { desktop_id: 'code.desktop' },     target: { col: 2, layer: 0 } },
+    { match: { pid_comm: 'Unity' },              target: { col: 3, layer: 1 } },
+]);
+
+test('collapsed main-row-size is restored from rules', () => {
+    // Состояние после «порчи»: main-row-size схлопнут до 2, воркспейсов 2.
+    const s = new FakeSettings({
+        'appendages': '[]',
+        'main-row-size': 2,
+        'window-rules': RULES_TO_COL_3,
+    });
+    withWM(2, () => {
+        const t = new Topology(s); t.load();
+        // Правила просят col 3 → ряд обязан быть шириной 4.
+        eq(t.mainRowSize, 4);
+        eq(t.appendageCount, 0);
+        // И это сохранено — extension.js дольёт недостающие воркспейсы.
+        eq(s.snapshot()['main-row-size'], 4);
+    });
+});
+
+test('floor does not shrink a wider row', () => {
+    const s = new FakeSettings({
+        'appendages': '[]',
+        'main-row-size': 6,
+        'window-rules': RULES_TO_COL_3,
+    });
+    withWM(6, () => {
+        const t = new Topology(s); t.load();
+        eq(t.mainRowSize, 6);   // шире, чем просят правила — не трогаем
+    });
+});
+
+test('floor keeps appendages intact', () => {
+    const s = new FakeSettings({
+        'appendages': JSON.stringify([{col:1,dir:'up'}, {col:1,dir:'up'}]),
+        'main-row-size': 2,
+        'window-rules': RULES_TO_COL_3,
+    });
+    withWM(4, () => {   // 2 main + 2 appendages
+        const t = new Topology(s); t.load();
+        eq(t.mainRowSize, 4);
+        eq(t.appendageCount, 2);
+        // Отростки по-прежнему висят на своей колонке.
+        eq(t.positionOf(4), {col:1, layer:-1});
+        eq(t.positionOf(5), {col:1, layer:-2});
+    });
+});
+
+test('no rules → no floor', () => {
+    const s = new FakeSettings({
+        'appendages': '[]',
+        'main-row-size': 2,
+        'window-rules': '[]',
+    });
+    withWM(2, () => {
+        const t = new Topology(s); t.load();
+        eq(t.mainRowSize, 2);
+    });
+});
+
+test('garbage rules are ignored by the floor', () => {
+    const s = new FakeSettings({
+        'appendages': '[]',
+        'main-row-size': 2,
+        'window-rules': JSON.stringify([
+            { match: {}, target: { col: 99 } },      // сейф-лимит: игнор
+            { match: {}, target: { col: -1 } },      // отрицательная: игнор
+            { match: {}, target: { col: 'x' } },     // не число: игнор
+            { match: {}, target: {} },               // нет col: игнор
+        ]),
+    });
+    withWM(2, () => {
+        const t = new Topology(s); t.load();
+        eq(t.mainRowSize, 2);
+    });
+});
+
+test('malformed window-rules JSON does not throw', () => {
+    const s = new FakeSettings({
+        'appendages': '[]',
+        'main-row-size': 2,
+        'window-rules': '{not json',
+    });
+    withWM(2, () => {
+        const t = new Topology(s); t.load();
+        eq(t.mainRowSize, 2);
+    });
+});
+
 print('\nTopology.positionOf');
 test('main row positions', () => {
     const s = new FakeSettings({
