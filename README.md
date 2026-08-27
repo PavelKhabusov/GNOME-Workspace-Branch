@@ -1,16 +1,23 @@
+<div align="center">
+
+<img src="assets/icon.svg" width="96" alt="GNOME Workspace Branch">
+
 # GNOME Workspace Branch
 
-[![GNOME Shell](https://img.shields.io/badge/GNOME_Shell-50-4A86CF?style=flat-square&logo=gnome&logoColor=white)](https://www.gnome.org/)
-[![Wayland](https://img.shields.io/badge/Wayland-ready-success?style=flat-square)](https://wayland.freedesktop.org)
-[![Mutter](https://img.shields.io/badge/Mutter-50-2CA5E0?style=flat-square)](https://gitlab.gnome.org/GNOME/mutter)
-[![Platform](https://img.shields.io/badge/platform-Linux-blue?style=flat-square&logo=linux&logoColor=white)](https://www.linuxfoundation.org/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-yellow?style=flat-square)](LICENSE)
-[![ESM](https://img.shields.io/badge/GJS-ESM-FFCA28?style=flat-square)](https://gjs.guide/)
+**Optional vertical “appendages” for the horizontal workspace row.** Your main row stays exactly
+as configured — Auto Move Windows and index-based bindings keep working — and every column can grow up and down.
 
-A GNOME Shell extension that adds **optional vertical "appendages"** to the
-horizontal workspace row. Your main row stays exactly as you configured it —
-Auto Move Windows and any other index-based bindings keep working — and on
-top of that, every column can grow up and down with extra workspaces.
+![Status](https://img.shields.io/badge/status-active-2ea043)
+![Platform](https://img.shields.io/badge/platform-Linux%20%C2%B7%20Wayland-1f1f1f)
+![License](https://img.shields.io/badge/license-MIT-7ba7d4)
+
+![GNOME Shell](https://img.shields.io/badge/GNOME%20Shell-50-4A86CF?logo=gnome&logoColor=white)
+![Mutter](https://img.shields.io/badge/Mutter-50-2CA5E0)
+![GJS](https://img.shields.io/badge/GJS-ESM-F7DF1E?logo=javascript&logoColor=black)
+
+</div>
+
+---
 
 ```
                       [up_2]
